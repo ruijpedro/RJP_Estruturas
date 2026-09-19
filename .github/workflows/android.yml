@@ -1,0 +1,34 @@
+name: Android APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install
+        run: npm install
+      - name: Build web
+        run: npm run build
+      - name: Add Android
+        run: npx cap add android
+      - name: Native app icons
+        run: npx capacitor-assets generate --android
+      - name: Sync
+        run: npx cap sync android
+      - name: Build APK
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RJP-Structures-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
