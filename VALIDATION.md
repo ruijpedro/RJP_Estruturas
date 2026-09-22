@@ -1,62 +1,50 @@
-# Validação rápida — RJP Structures V1.6
+# Validação rápida — RJP Structures V1.5
 
-## 1. Viga simplesmente apoiada
-
-Dados:
-
-- vão: 6,00 m;
-- carga uniforme: 10 kN/m;
-- apoios simples.
-
-Solução analítica e resultado do motor:
-
-- R1 = 30,00 kN;
-- R2 = 30,00 kN;
-- Vmax = 30,00 kN;
-- Mmax = 45,00 kNm.
-
-## 2. Treliça simétrica
+## Benchmark 1 — viga simplesmente apoiada
 
 Dados:
 
-- vão: 6,00 m;
-- altura: 3,00 m;
-- carga vertical no nó superior: 20 kN;
-- apoio articulado à esquerda e móvel à direita.
+- vão: 6,00 m
+- carga uniforme: 10 kN/m
+- apoios simples
+
+Solução analítica:
+
+- R1 = 30,00 kN
+- R2 = 30,00 kN
+- Vmax = 30,00 kN
+- Mmax = 45,00 kNm
+
+Resultado do motor V1.5:
+
+- R1 = 30,00 kN
+- R2 = 30,00 kN
+- Vmax = 30,00 kN
+- Mmax = 45,00 kNm
+
+## Benchmark 2 — treliça simétrica
+
+Geometria:
+
+- vão 6,00 m
+- altura 3,00 m
+- carga vertical no nó superior: 20 kN
+- apoio articulado à esquerda e móvel à direita
 
 Resultado do motor:
 
-- reação vertical esquerda = 10,00 kN;
-- reação vertical direita = 10,00 kN.
+- reação vertical esquerda = 10,00 kN
+- reação vertical direita = 10,00 kN
+- diagonais superiores ≈ -14,142 kN (compressão)
+- cordas inferiores ≈ +10,00 kN (tração)
+- montante central ≈ 0 kN para este caso simétrico
 
-Confirma-se que o elemento `truss` trabalha axialmente.
+Este teste confirma que o novo elemento `truss` trabalha apenas axialmente.
 
-## 3. Ensaio EC2 de sanidade
+## Teste de TypeScript
 
-Viga retangular:
+A V1.5 foi verificada com `tsc --strict` usando declarações locais mínimas de React para validar a sintaxe e a tipagem do código da aplicação sem depender do download de pacotes.
 
-- b = 300 mm;
-- h = 500 mm;
-- C30;
-- aço 500 MPa;
-- MEd = 100 kNm;
-- VEd = 80 kN.
+## Nota
 
-O motor devolveu, no teste local:
-
-- d = 449 mm;
-- As,req ≈ 539,9 mm²;
-- VRd,c ≈ 61,75 kN;
-- 17 verificações/estados no resultado agregado.
-
-Este ensaio é de coerência numérica, não substitui validação normativa independente.
-
-## 4. TypeScript
-
-O código V1.6 foi verificado em modo `strict` e `isolatedModules` com TypeScript 5.8.3, usando declarações locais mínimas apenas para substituir React no ambiente offline. Não foram encontrados erros de tipagem no código `App.tsx`, `structural.ts` e `ec2.ts`.
-
-O ambiente de geração não teve resolução DNS para o registry npm, pelo que a instalação completa de dependências/Vite não pôde ser repetida localmente. O workflow GitHub incluído faz `npm install` antes do build.
-
-## Nota de engenharia
-
-Estes benchmarks verificam o núcleo para casos básicos. Para uso profissional, validar adicionalmente pórticos multi-vão/piso, combinações de ações, condições de apoio, deslocamentos, estabilidade e cada módulo EC2 contra cálculos independentes e o Anexo Nacional aplicável.
+Os benchmarks acima validam o núcleo MEF para casos simples. Uso profissional exige uma bateria alargada de ensaios para combinações de cargas, pórticos multi-vão/piso, deslocamentos, pilares e cada verificação EC2.

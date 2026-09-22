@@ -37,12 +37,3 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
 @media(max-width:980px){.topHeader{position:static;flex-direction:column;align-items:stretch;padding:10px}.brandBlock{min-width:0}.topActions{height:auto;justify-content:space-between}.topActions button,.topFileAction{flex:1;min-width:0;border-top:1px solid #ffffff22;border-left:0;padding:8px 4px}.studioLayout{grid-template-columns:68px 1fr}.propertiesPanel{grid-column:1 / -1;max-height:none}.leftToolbar{grid-row:1}.mockupWorkspace{grid-column:2}.bottomNav{overflow:auto;grid-template-columns:repeat(7,minmax(86px,1fr))}.bottomNav button{min-width:86px}.canvas{min-height:360px;height:52vh}.modelStrip{height:auto;flex-wrap:wrap}.versionPill{margin-left:0}}
 @media(max-width:640px){.brandBlock img{width:52px;height:52px}.brandBlock b{font-size:20px}.brandBlock span{font-size:8px;letter-spacing:2px}.topActions span,.topFileAction span{font-size:19px}.topActions button,.topFileAction{font-size:9px}.studioLayout{grid-template-columns:1fr;padding:7px}.leftToolbar{grid-column:1;grid-row:auto;flex-direction:row;overflow:auto}.leftToolbar button{min-width:62px;min-height:58px}.mockupWorkspace{grid-column:1}.canvasHeader{align-items:flex-start;gap:6px;flex-direction:column}.resultSwitch{width:100%;overflow:auto}.resultSwitch button{flex:1}.canvas{min-height:300px;height:46vh}.quickResults{grid-template-columns:repeat(2,1fr)}.propertiesPanel{grid-column:1}.modelSelect select{min-width:180px}.projectActions{grid-template-columns:1fr}.bottomNav{padding:5px 6px}.bottomNav button{min-width:78px;flex-direction:column;gap:2px}.bottomNav button span{font-size:16px}.bottomNav button small{font-size:8px}}
 @media print{.topHeader,.modelStrip,.leftToolbar,.mockupWorkspace,.bottomNav,footer,.warning,.printBtn{display:none!important}.studioLayout{display:block;padding:0}.propertiesPanel{max-height:none;border:0;box-shadow:none}.panelTitle{position:static}.card{break-inside:avoid}}
-
-/* V1.6 · editor estrutural interativo */
-.nodeHit{cursor:pointer}
-.tool-mover .nodeHit{cursor:grab}.tool-mover .nodeHit:active{cursor:grabbing}
-.tool-nó,.tool-barra,.tool-apoio,.tool-carga,.tool-apagar{cursor:crosshair}
-.interactionHint{font-size:13px;font-weight:850;fill:#0d5db7}
-.cursorLabel{font-size:11px;font-weight:750;fill:#5e6b76}
-.wideSecondary{width:100%;border:1px solid #c9d1d8;background:#f1f4f6;color:#263b4d;border-radius:7px;padding:9px 10px;font-size:10px;font-weight:850;margin:7px 0;cursor:pointer}
-.wideSecondary:hover{background:#e8edf1}
