@@ -45,6 +45,24 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      - name: Ensure adaptive icon background
+        run: |
+          mkdir -p android/app/src/main/res/values
+          cat > android/app/src/main/res/values/ic_launcher_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_launcher_background">#FFFFFF</color>
+          </resources>
+          EOF
+          for f in \
+            android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml \
+            android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          do
+            if [ -f "$f" ]; then
+              sed -i 's#@mipmap/ic_launcher_background#@color/ic_launcher_background#g' "$f"
+            fi
+          done
+
       - name: Build debug APK
         run: |
           cd android
@@ -54,6 +72,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v6
         with:
-          name: RJP-Structures-V1.6.0-debug-apk
+          name: RJP-Structures-V1.5.1-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
