@@ -58,6 +58,7 @@ export type ColumnInput = EC2MaterialInput & {
   l0: number
   phiLong?: number
   phiTie?: number
+  tieSpacing?: number
   AsProv?: number
   creepPhi?: number
   rm?: number
@@ -285,6 +286,24 @@ export function deflectionCheck(input:BeamInput, flex=beamFlexure(input)){
   return {L,Mqp,Ig,Icr,Ieff,Mcr,zeta,phiEff,Eeff,delta,limit,checks:[check]}
 }
 
+
+export function serviceStressCheck(input:BeamInput, flex=beamFlexure(input)){
+  const Mser=Math.abs(input.Mser??0.7*input.MEd)*1e6
+  const As=Math.max(flex.AsProv,1e-9)
+  const alphaE=flex.Es/flex.Ecm
+  // Secção retangular fissurada, armadura tracionada concentrada à profundidade d.
+  const a=alphaE*As
+  const x=(-a+Math.sqrt(a*a+2*input.b*a*flex.d))/input.b
+  const Icr=input.b*Math.pow(x,3)/3+alphaE*As*Math.pow(flex.d-x,2)
+  const sigmaC=Icr>0?Mser*x/Icr:Infinity
+  const sigmaS=Icr>0?alphaE*Mser*(flex.d-x)/Icr:Infinity
+  const sigmaCLim=0.60*input.fck
+  const sigmaSLim=0.80*input.fyk
+  const cCheck:EC2Check={id:'stress-c',title:'ELS · Tensão de compressão no betão',status:sigmaC<=sigmaCLim?'OK':'FAIL',demand:sigmaC,resistance:sigmaCLim,utilization:sigmaCLim>0?sigmaC/sigmaCLim:Infinity,unit:'MPa',note:'Verificação elástica fissurada; limite 0,60 fck para triagem da combinação de serviço.'}
+  const sCheck:EC2Check={id:'stress-s',title:'ELS · Tensão no aço',status:sigmaS<=sigmaSLim?'OK':'WARN',demand:sigmaS,resistance:sigmaSLim,utilization:sigmaSLim>0?sigmaS/sigmaSLim:Infinity,unit:'MPa',note:'Triagem de tensão no aço; confirmar o limite aplicável à combinação e natureza da ação.'}
+  return {Mser,alphaE,x,Icr,sigmaC,sigmaS,sigmaCLim,sigmaSLim,checks:[cCheck,sCheck]}
+}
+
 export function anchorageCheck(input:BeamInput, flex=beamFlexure(input)){
   const phi=input.phiAnchor??input.phiLong??16
   const eta1=input.goodBond===false?0.7:1
@@ -323,12 +342,13 @@ export function beamEC2(input:BeamInput){
   const torsion=torsionCheck(input,flex,shear)
   const crack=crackWidthCheck(input,flex)
   const deflection=deflectionCheck(input,flex)
+  const stresses=serviceStressCheck(input,flex)
   const anchorage=anchorageCheck(input,flex)
   const detailing=spacingAndDetailing(input,flex)
   const dur=durabilityCover(input.exposure??'XC2',input.structuralClass??4,input.deltaCdev??10,input.phiLong??16)
   const coverCheck:EC2Check={id:'cover',title:'Durabilidade · Recobrimento nominal',status:input.cover>=dur.cnom?'OK':'FAIL',demand:dur.cnom,resistance:input.cover,utilization:input.cover>0?dur.cnom/input.cover:Infinity,unit:'mm'}
-  const checks=[...flex.checks,...shear.checks,...torsion.checks,...crack.checks,...deflection.checks,coverCheck,...anchorage.checks,...detailing.checks]
-  return {flex,shear,torsion,crack,deflection,dur,anchorage,detailing,checks}
+  const checks=[...flex.checks,...shear.checks,...torsion.checks,...crack.checks,...deflection.checks,...stresses.checks,coverCheck,...anchorage.checks,...detailing.checks]
+  return {flex,shear,torsion,crack,deflection,stresses,dur,anchorage,detailing,checks}
 }
 
 export function columnEC2(input:ColumnInput){
@@ -363,14 +383,26 @@ export function columnEC2(input:ColumnInput){
   const MEd=Math.max(M0e+M2,M02,M0min)
   const NRd0=(c.fcd*(Ac-AsProv)+s.fyd*AsProv)/1000
   const axialUtil=NRd0>0?Math.abs(input.NEd)/NRd0:Infinity
+  // Interação N-M conservadora para disposição simétrica: metade da armadura total é tomada na face tracionada.
+  // O módulo de diagrama de interação por compatibilidade de deformações será a referência para casos biaxiais/especiais.
+  const mApprox=momentResistanceRect(input.b,d,Math.max(AsProv/2,1e-9),c.fcd,s.fyd,c.lambda,c.eta).MRd
+  const momentUtil=mApprox>0?MEd/mApprox:Infinity
+  const interaction=axialUtil+momentUtil
+  const phiLong=input.phiLong??16, phiTie=input.phiTie??8
+  const tieMinDia=Math.max(6,0.25*phiLong)
+  const tieMaxSpacing=Math.min(20*phiLong,Math.min(input.b,input.h),400)
+  const tieSpacing=input.tieSpacing??Math.min(200,tieMaxSpacing)
   const checks:EC2Check[]=[
     {id:'column-axial',title:'Pilar · Resistência axial de referência',status:axialUtil<=1?'OK':'FAIL',demand:Math.abs(input.NEd),resistance:NRd0,utilization:axialUtil,unit:'kN'},
+    {id:'column-nm',title:'Pilar · Interação N-M (triagem conservadora)',status:interaction<=1?'OK':'WARN',demand:interaction,resistance:1,utilization:interaction,unit:'ratio',note:'Triagem N/NRd + M/MRd; confirmar por diagrama de interação nos casos críticos/biaxiais.'},
+    {id:'column-tie-dia',title:'Pilar · Diâmetro mínimo das cintas',status:phiTie>=tieMinDia?'OK':'FAIL',demand:tieMinDia,resistance:phiTie,unit:'mm'},
+    {id:'column-tie-space',title:'Pilar · Espaçamento máximo das cintas',status:tieSpacing<=tieMaxSpacing?'OK':'FAIL',demand:tieSpacing,resistance:tieMaxSpacing,utilization:tieMaxSpacing>0?tieSpacing/tieMaxSpacing:Infinity,unit:'mm'},
     {id:'column-asmin',title:'Pilar · Armadura mínima',status:AsProv>=AsMin?'OK':'FAIL',demand:AsMin,resistance:AsProv,unit:'mm²'},
     {id:'column-asmax',title:'Pilar · Armadura máxima',status:AsProv<=AsMax?'OK':'FAIL',demand:AsProv,resistance:AsMax,unit:'mm²'},
     {id:'column-slender',title:'Pilar · Esbelteza / 2.ª ordem',status:secondOrderRequired?'WARN':'OK',demand:lambda,resistance:lambdaLim,utilization:lambdaLim>0?lambda/lambdaLim:0,unit:'',note:secondOrderRequired?'Incluído M2 pelo método da curvatura nominal.':'Efeitos de 2.ª ordem dispensáveis pelo critério de esbelteza.'},
     {id:'column-minmom',title:'Pilar · Momento mínimo',status:MEd>=M0min?'OK':'FAIL',demand:M0min,resistance:MEd,unit:'kNm'}
   ]
-  return {Ac,d,i,lambda,M01,M02,M0e,M0min,n,AsMin,AsMax,AsProv,omega,A,B,C,lambdaLim,secondOrderRequired,Kr,beta,Kphi,curvature,e2,M2,MEd,NRd0,checks}
+  return {Ac,d,i,lambda,M01,M02,M0e,M0min,n,AsMin,AsMax,AsProv,omega,A,B,C,lambdaLim,secondOrderRequired,Kr,beta,Kphi,curvature,e2,M2,MEd,NRd0,MRdApprox:mApprox,axialUtil,momentUtil,interaction,phiLong,phiTie,tieMinDia,tieMaxSpacing,tieSpacing,checks}
 }
 
 export function biaxialColumnCheck(MEdy:number,MRdy:number,MEdz:number,MRdz:number,NEd:number,NRd:number){
@@ -392,7 +424,7 @@ export function slabEC2(input:SlabInput){
 export function punchingEC2(input:PunchingInput){
   const c=concreteProps(input.fck,input.alphaCC,input.gammaC)
   const d=effectiveDepth(input.h,input.cover,0,input.phi??12)
-  const u1=2*(input.c1+input.c2)+4*Math.PI*2*d
+  const u1=2*(input.c1+input.c2)+4*Math.PI*d
   const beta=input.beta??1.15
   const vEd=beta*Math.abs(input.VEd)*1000/(u1*d)
   const rho=clamp(input.rhoL??0.005,0,0.02)
@@ -432,4 +464,42 @@ export function firePrecheck(element:'beam'|'slab'|'column',R:30|60|90|120,b:num
   const minDim=element==='slab'?h:Math.min(b,h)
   const ok=minDim>=t[0]&&axisDistance>=t[1]
   return {minDimReq:t[0],axisReq:t[1],check:{id:'fire',title:`Incêndio · Pré-verificação R${R}`,status:ok?'OK':'WARN',demand:minDim,resistance:t[0],unit:'mm',note:'Triagem conservadora. Confirmar pela EN 1992-1-2 com o caso estrutural, nível de carga e configuração real.'} as EC2Check}
+}
+
+export type StirrupSolution = {phi:number;legs:number;spacing:number;AswPerS:number;utilization:number}
+
+/** Seleciona uma disposição prática de estribos que satisfaça Asw/s e smax. */
+export function chooseStirrupsEC2(AswPerSReq:number,d:number){
+  const phis=[6,8,10,12]
+  const legs=[2,4]
+  const spacings=[300,250,225,200,175,150,125,100,75]
+  const smax=Math.min(0.75*d,600)
+  const out:StirrupSolution[]=[]
+  for(const phi of phis) for(const nLegs of legs) for(const spacing of spacings){
+    if(spacing>smax+1e-9) continue
+    const Asw=nLegs*Math.PI*phi*phi/4
+    const AswPerS=Asw/spacing
+    if(AswPerS+1e-12>=AswPerSReq){
+      out.push({phi,legs:nLegs,spacing,AswPerS,utilization:AswPerSReq/AswPerS})
+    }
+  }
+  return out.sort((a,b)=>a.AswPerS-b.AswPerS || b.spacing-a.spacing || a.phi-b.phi).slice(0,8)
+}
+
+export type ColumnBarSolution = {phi:number;n:number;area:number;clearX:number;status:EC2Status}
+
+/** Seleção esquemática de armadura longitudinal simétrica para pilares retangulares. */
+export function chooseColumnBarsEC2(AsReq:number,b:number,h:number,cover:number,phiTie=8,dg=20){
+  const phis=[12,14,16,20,25,32]
+  const counts=[4,6,8,10,12,16]
+  const out:ColumnBarSolution[]=[]
+  for(const phi of phis) for(const n of counts){
+    const area=n*Math.PI*phi*phi/4
+    if(area+1e-9<AsReq) continue
+    const barsOnFace=Math.max(2,Math.ceil(n/4)+1)
+    const clearX=(b-2*(cover+phiTie)-2*phi)/(Math.max(1,barsOnFace-1))
+    const minClear=minLongitudinalSpacing(phi,dg)
+    out.push({phi,n,area,clearX,status:clearX>=minClear?'OK':'WARN'})
+  }
+  return out.sort((a,b2)=>(a.status==='OK'?0:1)-(b2.status==='OK'?0:1) || a.area-b2.area || a.n-b2.n).slice(0,8)
 }

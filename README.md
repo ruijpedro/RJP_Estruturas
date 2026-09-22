@@ -1,63 +1,137 @@
-# RJP Structures V1.1.0
+# RJP Structures V1.6.0
 
-Aplicação Web/Android (React + Vite + Capacitor) para análise estrutural 2D e dimensionamento de betão armado.
+Aplicação Web/Android (React + Vite + Capacitor) para **Vigas + Pórticos 2D + Treliças 2D**, com motor MEF, interface totalmente em **Português de Portugal**, dimensionamento modular de **Betão Armado segundo EC2** e pormenorização esquemática.
 
-## Correção do GitHub Actions
+## V1.6 — editor estrutural interativo
 
-O erro `Dependencies lock file is not found` vinha de `cache: npm` no `actions/setup-node`. Nesta revisão o workflow deixa de exigir lock file/cache e instala com `npm install --no-audit --no-fund`. Mantém Node 22.23.2 e Java 21.
+A V1.6 transforma a área gráfica num editor utilizável diretamente sobre a grelha:
 
-## EC2 implementado nesta revisão
+- **Nó** — toque na grelha para criar um novo nó;
+- **Barra** — toque em dois nós para criar uma barra;
+- **Apoio** — toque num nó para alternar entre articulado, móvel, encastre e livre;
+- **Carga** — toque num nó para acrescentar uma carga vertical ou numa barra para acrescentar uma carga distribuída;
+- **Mover** — arraste um nó; a posição é ajustada ao snap definido;
+- **Apagar** — toque numa barra ou nó para remover;
+- **Selecionar** — seleção direta de nós e barras para edição numérica no painel lateral.
 
-O motor EC2 modular está em `src/ec2.ts` e cobre o núcleo usado em estruturas correntes de betão armado e na metodologia IPL:
+O painel de propriedades permite editar:
 
-- materiais: `fcd`, `fyd`, `fctm`, `fctd`, `Ecm`, bloco retangular, `nu1`;
-- vigas: flexão, `As,req`, `As,min`, `As,max`, capacidade `MRd`, seleção automática de varões;
-- corte: `VRd,c`, `VRd,max`, `VRd,s`, `Asw/s` e armadura transversal mínima;
-- torção: modelo equivalente e interação V+T;
-- ELS: fissuração `wk` e deformação estimada com rigidez efetiva/fluência;
-- durabilidade: X0/XC/XD/XS, `cmin,dur`, `cmin` e `cnom`;
-- pormenorização: espaçamento entre varões, estribos, ancoragem `lb,rqd / lbd` e sobreposição `l0`;
-- pilares: `M0e`, `M0,min`, esbelteza, `lambda_lim`, efeitos de 2.ª ordem por curvatura nominal, `As,min/max` e resistência axial de referência;
-- flexão biaxial: função de interação disponível no motor;
-- lajes: faixa de 1 m, flexão, corte, fissuração, deformação e espaçamento;
-- punçoamento: perímetro `u1`, `vEd`, `vRd,c`, `vRd,max` e indicação da necessidade de armadura;
-- sapatas: pressão, flexão nas duas direções e ligação ao módulo de punçoamento;
-- fadiga: pré-verificação por amplitude de tensão;
-- incêndio: pré-verificação conservadora R30/R60/R90/R120; a confirmação final continua dependente da EN 1992-1-2 e do caso real;
-- desenhos SVG esquemáticos de vigas/pilares e relatório imprimível/PDF.
+- coordenadas X/Y dos nós;
+- tipo de apoio;
+- Fx, Fy e Mz nodais;
+- E e A das barras;
+- largura, altura e recobrimento das peças de betão;
+- carga distribuída local q;
+- snap da grelha.
 
-## Perfil IPL
+O cálculo MEF é atualizado automaticamente após cada alteração válida do modelo.
 
-A base usa os parâmetros que foram usados na metodologia do projeto RJP/Betão Armado:
+## Interface V1.6
 
-- `alphaCC = 0.85` por defeito;
-- `gammaC = 1.5`;
-- `gammaS = 1.15`;
-- `cot(theta) = 1` por defeito;
-- apresentação explícita de `MEd`, `VEd`, `As`, `VRd`, `wk`, deformação, ancoragens e verificações.
+Mantém o mockup aprovado:
 
-O motor permite alterar os parâmetros para outro perfil/Anexo Nacional.
+- cabeçalho RJP com **Novo / Abrir / Guardar / Calcular / Relatório**;
+- barra lateral de ferramentas;
+- grande área de desenho com grelha técnica;
+- resultados **N / V / M / Deformada** sobre o modelo;
+- quadro rápido de resultados;
+- painel de propriedades contextual;
+- navegação inferior **Modelo / Cargas / Resultados / EC2 / Pormenorização / Relatório / Definições**;
+- layout adaptado a PC e tablet.
 
-## Limite de âmbito
+## Motor estrutural
 
-A V1.1 cobre de forma ampla o dimensionamento corrente de betão armado em edifícios. O EC2 normativo completo contém situações especializadas que precisam de informação adicional (por exemplo pré-esforço, betão leve, interfaces, modelos específicos de escoras e tirantes, fadiga avançada, incêndio termo-mecânico e regras particulares de anexos nacionais). Esses casos ficam isolados por módulos para não serem apresentados como verificados sem os dados necessários.
+Unidades da interface:
+
+- geometria: m;
+- forças: kN;
+- momentos: kNm;
+- cargas distribuídas: kN/m.
+
+Internamente o MEF trabalha em **N-mm**, coerente com `E` em MPa, `A` em mm² e `I` em mm⁴.
+
+Suporta:
+
+- elementos de pórtico plano 2D;
+- barras de treliça exclusivamente axiais;
+- cargas nodais `Fx`, `Fy`, `Mz`;
+- carga distribuída local `qy` em elementos de pórtico;
+- reações;
+- deslocamentos;
+- deformada;
+- diagramas N/V/M;
+- valores críticos ao longo das barras.
+
+## Betão Armado / EC2
+
+Mantém os módulos existentes:
+
+- propriedades do betão e aço;
+- flexão e armadura longitudinal;
+- `As,req`, `As,min`, `As,max`, `MRd`;
+- momentos positivos/negativos;
+- corte `VRd,c`, `VRd,s`, `VRd,max`;
+- seleção de estribos;
+- torção/interação;
+- fissuração;
+- deformações;
+- tensões de serviço;
+- durabilidade e recobrimento;
+- espaçamentos, ancoragens e emendas;
+- pilares: esbelteza, 2.ª ordem, armadura e interação N-M de triagem;
+- lajes por faixa de 1 m;
+- punçoamento;
+- sapatas;
+- fadiga simplificada;
+- pré-verificação de incêndio;
+- desenhos esquemáticos e mapa estimado de armaduras.
+
+Ver `EC2_COVERAGE.md` para a matriz de cobertura e limitações.
+
+## Projeto e ficheiros
+
+A V1.6 guarda também a **geometria editada** no projeto JSON:
+
+- modo;
+- definições;
+- nós;
+- barras;
+- apoios;
+- cargas;
+- secções;
+- snap da grelha.
 
 ## Build local
 
+Requer Node >= 22.12 e < 25.
+
 ```bash
 npm install --no-audit --no-fund
 npm run build
 ```
 
-## Android
+## Android / GitHub Actions
 
-```bash
-npm install --no-audit --no-fund
-npm run build
-npx cap add android   # apenas se android/ ainda não existir
-npx cap sync android
-cd android
-./gradlew assembleDebug
+O workflow incluído usa:
+
+```text
+Node 24
+→ npm install
+→ TypeScript + Vite
+→ Capacitor Android
+→ geração dos ícones
+→ Gradle assembleDebug
+→ upload do APK
 ```
 
-APK: `android/app/build/outputs/apk/debug/app-debug.apk`
+Artefacto: `RJP-Structures-V1.6.0-debug-apk`.
+
+## Ficheiros principais
+
+- `src/App.tsx` — interface, editor gráfico e integração MEF/EC2;
+- `src/structural.ts` — motor MEF 2D;
+- `src/ec2.ts` — motor EC2;
+- `src/styles.css` — interface gráfica;
+- `.github/workflows/android.yml` — build Android;
+- `VALIDATION.md` — testes básicos;
+- `EC2_COVERAGE.md` — cobertura normativa.

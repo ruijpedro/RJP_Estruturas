@@ -1,17 +1,40 @@
 export type Node2D = {
+  /** Coordenadas geométricas em metros. */
   id: number; x: number; y: number;
   fixX?: boolean; fixY?: boolean; fixR?: boolean;
+  /** Cargas nodais: fx/fy em kN; mz em kNm. */
   fx?: number; fy?: number; mz?: number;
 }
 
+export type RCSection = { b:number; h:number; cover:number; fck:number; fyk:number }
+export type ElementKind = 'frame'|'truss'
+
 export type Element2D = {
   id: number; n1: number; n2: number;
+  /** E em MPa=N/mm²; A em mm²; I em mm⁴. */
   E: number; A: number; I: number;
+  /** Comportamento: pórtico 2D (default) ou barra de treliça axial. */
+  kind?: ElementKind;
+  /** Carga distribuída local em kN/m. Apenas para elementos frame. */
   qy?: number;
-  section?: { b: number; h: number; cover: number; fck: number; fyk: number };
+  section?: RCSection;
 }
 
 export type Model2D = { nodes: Node2D[]; elements: Element2D[] }
+export type MemberSample = {x:number; N:number; V:number; M:number}
+export type MemberResult = {
+  id:number;
+  kind:ElementKind;
+  /** Comprimento em m. */
+  L:number;
+  /** [u1,v1,r1,u2,v2,r2], translações em mm e rotações em rad. */
+  localDisplacements:number[];
+  /** [N1,V1,M1,N2,V2,M2] em N/Nmm. */
+  endForces:number[];
+  /** x em m; N/V em N; M em Nmm. */
+  samples:MemberSample[]
+}
+export type FrameResult = { U:number[]; R:number[]; members:MemberResult[] }
 
 type Mat = number[][]
 const zeros=(r:number,c:number):Mat=>Array.from({length:r},()=>Array(c).fill(0))
@@ -23,17 +46,21 @@ function inv(a:Mat):Mat {
   for(let i=0;i<n;i++){
     let p=i
     for(let r=i+1;r<n;r++) if(Math.abs(m[r][i])>Math.abs(m[p][i])) p=r
-    if(Math.abs(m[p][i])<1e-12) throw new Error('Matriz singular. Verifique apoios/estabilidade do modelo.')
+    if(Math.abs(m[p][i])<1e-12) throw new Error('Matriz singular. Verifique apoios, libertações e estabilidade do modelo.')
     ;[m[i],m[p]]=[m[p],m[i]]
-    const d=m[i][i]; for(let j=0;j<2*n;j++)m[i][j]/=d
-    for(let r=0;r<n;r++) if(r!==i){ const f=m[r][i]; for(let j=0;j<2*n;j++)m[r][j]-=f*m[i][j] }
+    const d=m[i][i]
+    for(let j=0;j<2*n;j++)m[i][j]/=d
+    for(let r=0;r<n;r++) if(r!==i){
+      const f=m[r][i]
+      for(let j=0;j<2*n;j++)m[r][j]-=f*m[i][j]
+    }
   }
   return m.map(r=>r.slice(n))
 }
 
-function localK(E:number,A:number,I:number,L:number):Mat {
-  const EA=E*A/L, EI=E*I
-  const a=12*EI/L**3, b=6*EI/L**2, c=4*EI/L, d=2*EI/L
+function localKFrame(E:number,A:number,I:number,Lmm:number):Mat {
+  const EA=E*A/Lmm, EI=E*I
+  const a=12*EI/Lmm**3, b=6*EI/Lmm**2, c=4*EI/Lmm, d=2*EI/Lmm
   return [
     [EA,0,0,-EA,0,0],
     [0,a,b,0,-a,b],
@@ -43,63 +70,114 @@ function localK(E:number,A:number,I:number,L:number):Mat {
     [0,b,d,0,-b,c]
   ]
 }
+
+function localKTruss(E:number,A:number,Lmm:number):Mat {
+  const EA=E*A/Lmm
+  return [
+    [EA,0,0,-EA,0,0],
+    [0,0,0,0,0,0],
+    [0,0,0,0,0,0],
+    [-EA,0,0,EA,0,0],
+    [0,0,0,0,0,0],
+    [0,0,0,0,0,0]
+  ]
+}
+
 function T(c:number,s:number):Mat { return [
   [c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],
   [0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]
 ]}
 
-export function solveFrame(model:Model2D){
-  const nd=model.nodes.length*3, K=zeros(nd,nd), F=Array(nd).fill(0)
+function memberSamples(Lmm:number,qNmm:number,end:number[],kind:ElementKind,count=81):MemberSample[]{
+  if(kind==='truss'){
+    const N0=-end[0], NL=end[3]
+    return Array.from({length:count},(_,i)=>{
+      const xmm=Lmm*i/(count-1)
+      const t=xmm/Math.max(Lmm,1e-12)
+      return {x:xmm/1000,N:N0+(NL-N0)*t,V:0,M:0}
+    })
+  }
+  const M0=-end[2], ML=end[5]
+  const c1=(ML-M0+qNmm*Lmm*Lmm/2)/Math.max(Lmm,1e-12)
+  const N0=-end[0], NL=end[3]
+  return Array.from({length:count},(_,i)=>{
+    const xmm=Lmm*i/(count-1)
+    const M=M0+c1*xmm-qNmm*xmm*xmm/2
+    const V=c1-qNmm*xmm
+    const N=N0+(NL-N0)*(xmm/Math.max(Lmm,1e-12))
+    return {x:xmm/1000,N,V,M}
+  })
+}
+
+/**
+ * Pórtico/treliça plana 2D por MEF.
+ * Entrada: coordenadas [m], cargas nodais [kN/kNm], q [kN/m].
+ * Internamente: N-mm, coerente com E [MPa], A [mm²] e I [mm⁴].
+ */
+export function solveFrame(model:Model2D):FrameResult{
+  if(model.nodes.length<2) throw new Error('O modelo precisa de pelo menos dois nós.')
+  if(!model.elements.length) throw new Error('O modelo não tem elementos.')
+
+  const nd=model.nodes.length*3, K=zeros(nd,nd), F=Array<number>(nd).fill(0)
   const nodeIndex=new Map(model.nodes.map((n,i)=>[n.id,i]))
-  model.nodes.forEach((n,i)=>{F[3*i]=n.fx??0;F[3*i+1]=n.fy??0;F[3*i+2]=n.mz??0})
-  const cache:any[]=[]
+  model.nodes.forEach((n,i)=>{
+    F[3*i]=(n.fx??0)*1000
+    F[3*i+1]=(n.fy??0)*1000
+    F[3*i+2]=(n.mz??0)*1e6
+  })
+
+  const frameConnected=new Set<number>()
   for(const e of model.elements){
-    const i=nodeIndex.get(e.n1)!, j=nodeIndex.get(e.n2)!, n1=model.nodes[i],n2=model.nodes[j]
-    const dx=n2.x-n1.x,dy=n2.y-n1.y,L=Math.hypot(dx,dy),c=dx/L,s=dy/L
-    const kl=localK(e.E,e.A,e.I,L), tr=T(c,s), kg=mm(mt(tr),mm(kl,tr))
+    if((e.kind??'frame')==='frame'){
+      frameConnected.add(e.n1); frameConnected.add(e.n2)
+    }
+  }
+
+  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;dofs:number[];fl:number[];q:number}[]=[]
+  for(const e of model.elements){
+    const i=nodeIndex.get(e.n1), j=nodeIndex.get(e.n2)
+    if(i===undefined||j===undefined) throw new Error(`Elemento E${e.id}: nó inexistente.`)
+    const n1=model.nodes[i],n2=model.nodes[j]
+    const dx=(n2.x-n1.x)*1000,dy=(n2.y-n1.y)*1000,Lmm=Math.hypot(dx,dy)
+    if(Lmm<=1e-6) throw new Error(`Elemento E${e.id}: comprimento nulo.`)
+    const Lm=Lmm/1000,c=dx/Lmm,s=dy/Lmm,kind=e.kind??'frame'
+    const kl=kind==='truss'?localKTruss(e.E,e.A,Lmm):localKFrame(e.E,e.A,e.I,Lmm)
+    const tr=T(c,s), kg=mm(mt(tr),mm(kl,tr))
     const dofs=[3*i,3*i+1,3*i+2,3*j,3*j+1,3*j+2]
     dofs.forEach((r,rr)=>dofs.forEach((cc,cc2)=>K[r][cc]+=kg[rr][cc2]))
-    const q=e.qy??0
-    const fl=[0,q*L/2,q*L*L/12,0,q*L/2,-q*L*L/12]
+
+    const q=kind==='frame'?(e.qy??0):0 // kN/m == N/mm numericamente
+    const fl=kind==='frame'?[0,q*Lmm/2,q*Lmm*Lmm/12,0,q*Lmm/2,-q*Lmm*Lmm/12]:[0,0,0,0,0,0]
     const fg=mm(mt(tr),fl.map(v=>[v])).map(r=>r[0])
     dofs.forEach((dof,k)=>F[dof]+=fg[k])
-    cache.push({e,i,j,L,c,s,tr,kl,dofs,fl})
+    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,dofs,fl,q})
   }
+
   const fixed:boolean[]=[]
-  model.nodes.forEach(n=>fixed.push(!!n.fixX,!!n.fixY,!!n.fixR))
+  model.nodes.forEach(n=>{
+    // Em nós exclusivamente de treliça a rotação não tem rigidez física: elimina-se o DOF rotacional.
+    const autoFixR=!frameConnected.has(n.id)
+    fixed.push(!!n.fixX,!!n.fixY,!!n.fixR||autoFixR)
+  })
+
   const free=fixed.map((f,i)=>!f?i:-1).filter(i=>i>=0)
+  if(!free.length) throw new Error('Não existem graus de liberdade livres.')
   const Kff=free.map(i=>free.map(j=>K[i][j])), Ff=free.map(i=>F[i])
-  const uf=mm(inv(Kff),Ff.map(v=>[v])).map(r=>r[0]), U=Array(nd).fill(0)
+  const uf=mm(inv(Kff),Ff.map(v=>[v])).map(r=>r[0]), U=Array<number>(nd).fill(0)
   free.forEach((d,k)=>U[d]=uf[k])
-  const R=K.map((row,i)=>row.reduce((s,v,j)=>s+v*U[j],0)-F[i])
-  const members=cache.map(ca=>{
-    const ug=ca.dofs.map((d:number)=>U[d]), ul=mm(ca.tr,ug.map((v:number)=>[v])).map(r=>r[0])
-    const fint=mm(ca.kl,ul.map((v:number)=>[v])).map(r=>r[0]).map((v:number,k:number)=>v-ca.fl[k])
-    return { id:ca.e.id, L:ca.L, localDisplacements:ul, endForces:fint }
+  const R=K.map((row,i)=>row.reduce((sum,v,j)=>sum+v*U[j],0)-F[i])
+
+  const members:MemberResult[]=cache.map(ca=>{
+    const ug=ca.dofs.map(d=>U[d]), ul=mm(ca.tr,ug.map(v=>[v])).map(r=>r[0])
+    const fint=mm(ca.kl,ul.map(v=>[v])).map(r=>r[0]).map((v,k)=>v-ca.fl[k])
+    return {
+      id:ca.e.id,
+      kind:ca.kind,
+      L:ca.Lm,
+      localDisplacements:ul,
+      endForces:fint,
+      samples:memberSamples(ca.Lmm,ca.q,fint,ca.kind)
+    }
   })
   return {U,R,members}
-}
-
-export function ec2RectangularBeam(input:{b:number,h:number,cover:number,fck:number,fyk:number,med:number,ved:number}){
-  const {b,h,cover,fck,fyk,med,ved}=input
-  const phi=16, d=h-cover-8-phi/2
-  const fcd=fck/1.5, fyd=fyk/1.15
-  const z=Math.min(0.95*d,0.9*d)
-  const AsReq=Math.abs(med)*1e6/(fyd*z)
-  const AsMin=Math.max(0.26*(0.3*fck**(2/3))/fyk*b*d,0.0013*b*d)
-  const As=Math.max(AsReq,AsMin)
-  const rho=As/(b*d)
-  const k=Math.min(2,1+Math.sqrt(200/d))
-  const vrdc=(0.18/1.5)*k*Math.cbrt(100*rho*fck)*b*d/1000
-  const shearNeedsStirrups=Math.abs(ved)>vrdc
-  const theta=45*Math.PI/180, fywd=fyd
-  const aswPerS=shearNeedsStirrups ? Math.abs(ved)*1000/(z*fywd*(1/Math.tan(theta))) : 0
-  return {d,fcd,fyd,z,AsReq,AsMin,As,rho,vrdc,shearNeedsStirrups,aswPerS}
-}
-
-export function chooseBars(As:number){
-  const phis=[10,12,14,16,20,25,32]
-  const sols:{phi:number,n:number,area:number}[]=[]
-  for(const phi of phis)for(let n=2;n<=8;n++){const area=n*Math.PI*phi*phi/4;if(area>=As)sols.push({phi,n,area})}
-  return sols.sort((a,b)=>a.area-b.area || a.n-b.n).slice(0,5)
 }
