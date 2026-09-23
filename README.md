@@ -1,30 +1,25 @@
-# RJP Structures V1.7.2
+# RJP Structures V1.7.3
 
 Aplicação WebApp/PWA + Android (React + Vite + Capacitor) para **Vigas, Pórticos 2D e Treliças 2D**, com motor MEF, Betão Armado/EC2, pormenorização esquemática e interface em **Português de Portugal**.
 
-## Novidades V1.7.2 — modelo criado de raiz
+## Novidades V1.7.3 — cargas avançadas em barras
 
-A geometria deixou de estar limitada aos modelos de exemplo. Agora é possível:
+A ferramenta **Carga** foi ampliada. Ao tocar numa barra de pórtico/viga é agora possível criar, editar e apagar individualmente:
 
-- carregar em **Novo** e iniciar o tipo de modelo atual completamente em branco;
-- escolher **Nó** e tocar na grelha para criar nós com snap de 0,25 m;
-- escolher **Barra**, tocar no nó inicial e depois no nó final para criar uma barra;
-- usar **Mover** para alterar as coordenadas de um nó;
-- usar **Apagar** para eliminar barras e nós, além de forças, cargas distribuídas e apoios;
-- apagar um nó ligado a barras, com confirmação para remover também as barras associadas;
-- regressar ao modelo de exemplo em qualquer altura.
+- força concentrada transversal `Py` em qualquer posição `x`;
+- força concentrada axial `Px` em qualquer posição `x`;
+- momento concentrado em qualquer posição `x`;
+- carga distribuída **retangular/uniforme**;
+- carga distribuída **triangular crescente** `0 → q`;
+- carga distribuída **triangular decrescente** `q → 0`;
+- carga distribuída **trapezoidal** `q1 → q2`;
+- qualquer carga distribuída pode atuar em todo o vão ou apenas num troço `a–b`.
 
-### Rótulas / libertações de rotação
+As cargas em barras são definidas nos **eixos locais x/y**. Os valores negativos permitem inverter o sentido. Nas treliças, as ações continuam a ser introduzidas nos nós, de acordo com a formulação axial adotada.
 
-Foi acrescentada a ferramenta **Rótula**:
+O motor MEF converte estas ações em vetores nodais equivalentes usando as funções de forma da viga; as distribuições lineares são integradas numericamente por Gauss. Os diagramas `N`, `V` e `M` passam a considerar as descontinuidades de forças e momentos concentrados e a variação das cargas triangulares/trapezoidais.
 
-- ao ativá-la, aparecem pontos de seleção junto às duas extremidades das barras de pórtico;
-- tocar numa extremidade insere uma libertação de rotação;
-- tocar novamente remove a rótula e repõe a ligação rígida;
-- a barra selecionada também apresenta botões **Inserir/Remover rótula inicial/final** no painel de propriedades;
-- as rótulas fazem parte do modelo MEF, não são apenas símbolos gráficos.
-
-O motor usa condensação estática das rotações libertadas. Uma barra biarticulada sob carga uniforme apresenta momentos de extremidade nulos; uma barra encastrada-articulada transmite momento apenas na extremidade rígida.
+Mantêm-se todas as capacidades da V1.7.2: criação do modelo de raiz, nós, barras, rótulas, apoios, mover/apagar elementos, WebApp/PWA e APK Android.
 
 ## Edição gráfica
 
@@ -35,7 +30,7 @@ Ferramentas disponíveis:
 - **Barra** — criar barras entre dois nós;
 - **Rótula** — inserir/remover libertações de rotação;
 - **Apoio** — Livre → Móvel → Articulado → Encastrado;
-- **Carga** — editar Fx/Fy/Mz num nó ou qy numa barra;
+- **Carga** — Fx/Fy/Mz nos nós e forças/momentos/cargas distribuídas avançadas nas barras;
 - **Mover** — alterar coordenadas do nó;
 - **Apagar** — barras, nós, apoios e ações.
 
@@ -54,13 +49,13 @@ Mantém:
 - contraste reforçado e áreas de toque maiores;
 - gravação automática, recuperação e JSON de projeto.
 
-Os ficheiros JSON V1.7.2 guardam também a geometria livre e as rótulas.
+Os ficheiros JSON V1.7.3 guardam também a geometria livre e as rótulas.
 
 ## Motor estrutural
 
 Unidades de entrada: geometria em m, ações em kN/kNm e q em kN/m. O solver trabalha internamente em N-mm, com `E` em MPa, `A` em mm² e `I` em mm⁴.
 
-Suporta elementos frame 2D e treliça, cargas nodais, cargas distribuídas locais, apoios, reações, deslocamentos, N/V/M, deformada e libertações rotacionais de extremidade.
+Suporta elementos frame 2D e treliça, cargas nodais, forças e momentos concentrados nas barras, cargas distribuídas retangulares/triangulares/trapezoidais totais ou parciais, apoios, reações, deslocamentos, N/V/M, deformada e libertações rotacionais de extremidade.
 
 ## Betão Armado / EC2
 
@@ -77,11 +72,11 @@ npm run build
 
 O workflow Android usa Node 24 + Java 21 e publica o artefacto:
 
-`RJP-Structures-V1.7.2-debug-apk`
+`RJP-Structures-V1.7.3-debug-apk`
 
 O workflow WebApp publica no GitHub Pages e gera:
 
-`RJP-Structures-V1.7.2-WebApp`
+`RJP-Structures-V1.7.3-WebApp`
 
 ## WebApp / PWA
 
@@ -95,5 +90,6 @@ A mesma base pode ser instalada como PWA em computador, tablet ou telemóvel e c
 - `src/styles.css` — interface e acessibilidade;
 - `.github/workflows/android.yml` — APK;
 - `.github/workflows/webapp.yml` — WebApp;
-- `CHANGELOG_V1_7_2.md` — alterações desta versão;
-- `VALIDATION_V1_7_2.md` — ensaios efetuados.
+- `CHANGELOG_V1_7_3.md` — alterações desta versão;
+- `VALIDATION_V1_7_3.md` — ensaios das cargas avançadas;
+- os changelogs/validações das versões anteriores são mantidos como histórico.

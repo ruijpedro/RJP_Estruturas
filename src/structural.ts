@@ -8,6 +8,10 @@ export type Node2D = {
 
 export type RCSection = { b:number; h:number; cover:number; fck:number; fyk:number }
 export type ElementKind = 'frame'|'truss'
+export type MemberLoad =
+  | {id:number; type:'point'; x:number; py?:number; px?:number}
+  | {id:number; type:'moment'; x:number; mz:number}
+  | {id:number; type:'distributed'; a:number; b:number; qy1:number; qy2:number}
 
 export type Element2D = {
   id: number; n1: number; n2: number;
@@ -15,8 +19,10 @@ export type Element2D = {
   E: number; A: number; I: number;
   /** Comportamento: pórtico 2D (default) ou barra de treliça axial. */
   kind?: ElementKind;
-  /** Carga distribuída local em kN/m. Apenas para elementos frame. */
+  /** Carga distribuída local uniforme legada em kN/m. Apenas para elementos frame. */
   qy?: number;
+  /** Cargas aplicadas diretamente na barra, referidas aos eixos locais. */
+  loads?: MemberLoad[];
   /** Libertações de rotação (rótulas) nas extremidades locais do elemento frame. */
   releaseR1?: boolean;
   releaseR2?: boolean;
@@ -126,23 +132,78 @@ function T(c:number,s:number):Mat { return [
   [0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]
 ]}
 
-function memberSamples(Lmm:number,qNmm:number,end:number[],kind:ElementKind,count=81):MemberSample[]{
+const GL5_X=[-0.906179845938664,-0.538469310105683,0,0.538469310105683,0.906179845938664]
+const GL5_W=[0.236926885056189,0.478628670499366,0.568888888888889,0.478628670499366,0.236926885056189]
+
+function beamShape(x:number,L:number){
+  const r=Math.max(0,Math.min(1,x/Math.max(L,1e-12))),r2=r*r,r3=r2*r
+  return {
+    v1:1-3*r2+2*r3, th1:L*(r-2*r2+r3), v2:3*r2-2*r3, th2:L*(-r2+r3),
+    dv1:(-6*r+6*r2)/L, dth1:1-4*r+3*r2, dv2:(6*r-6*r2)/L, dth2:-2*r+3*r2
+  }
+}
+
+function addDistributedEquivalent(f:number[],Lmm:number,aMm:number,bMm:number,q1:number,q2:number){
+  const a=Math.max(0,Math.min(Lmm,aMm)),b=Math.max(a,Math.min(Lmm,bMm))
+  if(b-a<1e-9)return
+  const mid=(a+b)/2,half=(b-a)/2
+  for(let i=0;i<GL5_X.length;i++){
+    const x=mid+half*GL5_X[i],t=(x-a)/(b-a),q=q1+(q2-q1)*t,w=GL5_W[i]*half,n=beamShape(x,Lmm)
+    f[1]+=q*n.v1*w;f[2]+=q*n.th1*w;f[4]+=q*n.v2*w;f[5]+=q*n.th2*w
+  }
+}
+
+function memberEquivalentLoads(e:Element2D,Lmm:number):number[]{
+  const f=Array<number>(6).fill(0)
+  if((e.kind??'frame')!=='frame')return f
+  if(e.qy) addDistributedEquivalent(f,Lmm,0,Lmm,e.qy,e.qy)
+  for(const load of e.loads??[]){
+    if(load.type==='distributed'){
+      addDistributedEquivalent(f,Lmm,load.a*1000,load.b*1000,load.qy1,load.qy2)
+    }else if(load.type==='point'){
+      const x=Math.max(0,Math.min(Lmm,load.x*1000)),n=beamShape(x,Lmm)
+      const py=(load.py??0)*1000,px=(load.px??0)*1000,r=x/Lmm
+      f[0]+=px*(1-r);f[3]+=px*r
+      f[1]+=py*n.v1;f[2]+=py*n.th1;f[4]+=py*n.v2;f[5]+=py*n.th2
+    }else if(load.type==='moment'){
+      const x=Math.max(0,Math.min(Lmm,load.x*1000)),n=beamShape(x,Lmm),m=load.mz*1e6
+      f[1]+=m*n.dv1;f[2]+=m*n.dth1;f[4]+=m*n.dv2;f[5]+=m*n.dth2
+    }
+  }
+  return f
+}
+
+function integrateDistributedTo(load:Extract<MemberLoad,{type:'distributed'}>,xmm:number,Lmm:number){
+  const a=Math.max(0,Math.min(Lmm,load.a*1000)),b=Math.max(a,Math.min(Lmm,load.b*1000)),u=Math.min(Math.max(xmm,a),b)
+  if(u<=a)return {force:0,moment:0}
+  const mid=(a+u)/2,half=(u-a)/2
+  let force=0,moment=0
+  for(let i=0;i<GL5_X.length;i++){
+    const s=mid+half*GL5_X[i],t=(s-a)/Math.max(b-a,1e-12),q=load.qy1+(load.qy2-load.qy1)*t,w=GL5_W[i]*half
+    force+=q*w;moment+=q*(xmm-s)*w
+  }
+  return {force,moment}
+}
+
+function memberSamples(Lmm:number,e:Element2D,end:number[],kind:ElementKind,count=81):MemberSample[]{
   if(kind==='truss'){
-    const N0=-end[0], NL=end[3]
+    const N0=-end[0]
     return Array.from({length:count},(_,i)=>{
       const xmm=Lmm*i/(count-1)
-      const t=xmm/Math.max(Lmm,1e-12)
-      return {x:xmm/1000,N:N0+(NL-N0)*t,V:0,M:0}
+      return {x:xmm/1000,N:N0,V:0,M:0}
     })
   }
-  const M0=-end[2],V0=end[1]
-  const N0=-end[0], NL=end[3]
+  const M0=-end[2],V0=end[1],N0=-end[0]
+  const fullUniform=e.qy??0
+  const custom=e.loads??[]
   return Array.from({length:count},(_,i)=>{
     const xmm=Lmm*i/(count-1)
-    // Equilíbrio da parte esquerda da barra: M(x)=M(0)+V(0)x+q x²/2.
-    const V=V0+qNmm*xmm
-    const M=M0+V0*xmm+qNmm*xmm*xmm/2
-    const N=N0+(NL-N0)*(xmm/Math.max(Lmm,1e-12))
+    let V=V0+fullUniform*xmm,M=M0+V0*xmm+fullUniform*xmm*xmm/2,N=N0
+    for(const load of custom){
+      if(load.type==='distributed'){const c=integrateDistributedTo(load,xmm,Lmm);V+=c.force;M+=c.moment}
+      else if(load.type==='point'){const xp=Math.max(0,Math.min(Lmm,load.x*1000));if(xmm>=xp-1e-9){const py=(load.py??0)*1000,px=(load.px??0)*1000;V+=py;M+=py*(xmm-xp);N+=px}}
+      else if(load.type==='moment'){const xp=Math.max(0,Math.min(Lmm,load.x*1000));if(xmm>=xp-1e-9)M-=load.mz*1e6}
+    }
     return {x:xmm/1000,N,V,M}
   })
 }
@@ -172,7 +233,7 @@ export function solveFrame(model:Model2D):FrameResult{
     }
   }
 
-  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;kc:Mat;dofs:number[];fl:number[];fc:number[];released:number[];q:number}[]=[]
+  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;kc:Mat;dofs:number[];fl:number[];fc:number[];released:number[]}[]=[]
   for(const e of model.elements){
     const i=nodeIndex.get(e.n1), j=nodeIndex.get(e.n2)
     if(i===undefined||j===undefined) throw new Error(`Elemento E${e.id}: nó inexistente.`)
@@ -181,8 +242,7 @@ export function solveFrame(model:Model2D):FrameResult{
     if(Lmm<=1e-6) throw new Error(`Elemento E${e.id}: comprimento nulo.`)
     const Lm=Lmm/1000,c=dx/Lmm,s=dy/Lmm,kind=e.kind??'frame'
     const kl=kind==='truss'?localKTruss(e.E,e.A,Lmm):localKFrame(e.E,e.A,e.I,Lmm)
-    const q=kind==='frame'?(e.qy??0):0 // kN/m == N/mm numericamente
-    const fl=kind==='frame'?[0,q*Lmm/2,q*Lmm*Lmm/12,0,q*Lmm/2,-q*Lmm*Lmm/12]:[0,0,0,0,0,0]
+    const fl=kind==='frame'?memberEquivalentLoads(e,Lmm):[0,0,0,0,0,0]
     const release=kind==='frame'?releasedFrameMatrices(kl,fl,!!e.releaseR1,!!e.releaseR2):{k:kl,f:fl,released:[] as number[]}
     const kc=release.k,fc=release.f,released=release.released
     const tr=T(c,s), kg=mm(mt(tr),mm(kc,tr))
@@ -190,7 +250,7 @@ export function solveFrame(model:Model2D):FrameResult{
     dofs.forEach((r,rr)=>dofs.forEach((cc,cc2)=>K[r][cc]+=kg[rr][cc2]))
     const fg=mm(mt(tr),fc.map(v=>[v])).map(r=>r[0])
     dofs.forEach((dof,k)=>F[dof]+=fg[k])
-    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,kc,dofs,fl,fc,released,q})
+    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,kc,dofs,fl,fc,released})
   }
 
   const fixed:boolean[]=[]
@@ -219,7 +279,7 @@ export function solveFrame(model:Model2D):FrameResult{
       L:ca.Lm,
       localDisplacements:ul,
       endForces:fint,
-      samples:memberSamples(ca.Lmm,ca.q,fint,ca.kind)
+      samples:memberSamples(ca.Lmm,ca.e,fint,ca.kind)
     }
   })
   return {U,R,members}
