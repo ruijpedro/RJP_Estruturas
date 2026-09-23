@@ -66,3 +66,14 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
 .largeTargets .topActions button,.largeTargets .topFileAction{min-height:76px;min-width:98px}.largeTargets .leftToolbar button{min-height:78px}.largeTargets .resultSwitch button,.largeTargets .viewportTools button{min-height:38px;min-width:58px}.largeTargets .projectActions button,.largeTargets .fileBtn,.largeTargets .inlineAction{min-height:44px}.largeTargets .bottomNav button{min-height:66px}.largeTargets .field input,.largeTargets .field select,.largeTargets .field>select{min-height:42px}
 @media(max-width:980px){.autosavePill{order:1}.versionPill{order:1}.largeTargets .topActions button,.largeTargets .topFileAction{min-width:0}}
 .editHint{color:#0f5f9d!important;background:#edf6ff;border:1px solid #c4ddf3;border-radius:999px;padding:3px 8px}
+
+/* V1.7.2 · editor livre e rótulas */
+.crosshairCanvas{cursor:crosshair}
+.emptyModelTitle{font-size:28px;font-weight:800;fill:#31475b}
+.emptyModelHint{font-size:15px;fill:#65717c}
+.hingeTarget{cursor:pointer;transition:.12s ease;filter:drop-shadow(0 1px 1px rgba(0,0,0,.12))}
+.hingeTarget:hover{stroke:#a80d19;stroke-width:4}
+.inlineButtons{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.freeModelCard .inlineAction,.hingeCard .inlineAction{width:auto;min-width:0}
+.hingeCard strong{color:#a80d19}
+@media (max-width:900px){.inlineButtons{flex-direction:column}.inlineButtons .inlineAction{width:100%}}

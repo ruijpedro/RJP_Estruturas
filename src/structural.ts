@@ -17,6 +17,9 @@ export type Element2D = {
   kind?: ElementKind;
   /** Carga distribuída local em kN/m. Apenas para elementos frame. */
   qy?: number;
+  /** Libertações de rotação (rótulas) nas extremidades locais do elemento frame. */
+  releaseR1?: boolean;
+  releaseR2?: boolean;
   section?: RCSection;
 }
 
@@ -83,6 +86,41 @@ function localKTruss(E:number,A:number,Lmm:number):Mat {
   ]
 }
 
+function releasedFrameMatrices(kl:Mat,fl:number[],releaseR1:boolean,releaseR2:boolean):{k:Mat;f:number[];released:number[]}{
+  const released:number[]=[]
+  if(releaseR1)released.push(2)
+  if(releaseR2)released.push(5)
+  if(!released.length)return {k:kl.map(r=>[...r]),f:[...fl],released}
+  const active=[0,1,2,3,4,5].filter(i=>!released.includes(i))
+  const Kaa=active.map(i=>active.map(j=>kl[i][j]))
+  const Kar=active.map(i=>released.map(j=>kl[i][j]))
+  const Kra=released.map(i=>active.map(j=>kl[i][j]))
+  const Krr=released.map(i=>released.map(j=>kl[i][j]))
+  const fa=active.map(i=>fl[i]),fr=released.map(i=>fl[i])
+  const invKrr=inv(Krr)
+  const corrK=mm(Kar,mm(invKrr,Kra))
+  const corrF=mm(Kar,mm(invKrr,fr.map(v=>[v]))).map(r=>r[0])
+  const condensed=zeros(6,6),f=Array<number>(6).fill(0)
+  active.forEach((ri,i)=>{
+    f[ri]=fa[i]-corrF[i]
+    active.forEach((cj,j)=>condensed[ri][cj]=Kaa[i][j]-corrK[i][j])
+  })
+  return {k:condensed,f,released}
+}
+
+function recoverReleasedLocalDisplacements(kl:Mat,fl:number[],uCondensed:number[],released:number[]):number[]{
+  if(!released.length)return [...uCondensed]
+  const active=[0,1,2,3,4,5].filter(i=>!released.includes(i))
+  const Kra=released.map(i=>active.map(j=>kl[i][j]))
+  const Krr=released.map(i=>released.map(j=>kl[i][j]))
+  const ua=active.map(i=>uCondensed[i]),fr=released.map(i=>fl[i])
+  const rhs=fr.map((v,i)=>v-Kra[i].reduce((sum,k,j)=>sum+k*ua[j],0))
+  const ur=mm(inv(Krr),rhs.map(v=>[v])).map(r=>r[0])
+  const out=[...uCondensed]
+  released.forEach((idx,i)=>out[idx]=ur[i])
+  return out
+}
+
 function T(c:number,s:number):Mat { return [
   [c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],
   [0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]
@@ -97,13 +135,13 @@ function memberSamples(Lmm:number,qNmm:number,end:number[],kind:ElementKind,coun
       return {x:xmm/1000,N:N0+(NL-N0)*t,V:0,M:0}
     })
   }
-  const M0=-end[2], ML=end[5]
-  const c1=(ML-M0+qNmm*Lmm*Lmm/2)/Math.max(Lmm,1e-12)
+  const M0=-end[2],V0=end[1]
   const N0=-end[0], NL=end[3]
   return Array.from({length:count},(_,i)=>{
     const xmm=Lmm*i/(count-1)
-    const M=M0+c1*xmm-qNmm*xmm*xmm/2
-    const V=c1-qNmm*xmm
+    // Equilíbrio da parte esquerda da barra: M(x)=M(0)+V(0)x+q x²/2.
+    const V=V0+qNmm*xmm
+    const M=M0+V0*xmm+qNmm*xmm*xmm/2
     const N=N0+(NL-N0)*(xmm/Math.max(Lmm,1e-12))
     return {x:xmm/1000,N,V,M}
   })
@@ -126,14 +164,15 @@ export function solveFrame(model:Model2D):FrameResult{
     F[3*i+2]=(n.mz??0)*1e6
   })
 
-  const frameConnected=new Set<number>()
+  const rotationallyConnected=new Set<number>()
   for(const e of model.elements){
     if((e.kind??'frame')==='frame'){
-      frameConnected.add(e.n1); frameConnected.add(e.n2)
+      if(!e.releaseR1)rotationallyConnected.add(e.n1)
+      if(!e.releaseR2)rotationallyConnected.add(e.n2)
     }
   }
 
-  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;dofs:number[];fl:number[];q:number}[]=[]
+  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;kc:Mat;dofs:number[];fl:number[];fc:number[];released:number[];q:number}[]=[]
   for(const e of model.elements){
     const i=nodeIndex.get(e.n1), j=nodeIndex.get(e.n2)
     if(i===undefined||j===undefined) throw new Error(`Elemento E${e.id}: nó inexistente.`)
@@ -142,33 +181,37 @@ export function solveFrame(model:Model2D):FrameResult{
     if(Lmm<=1e-6) throw new Error(`Elemento E${e.id}: comprimento nulo.`)
     const Lm=Lmm/1000,c=dx/Lmm,s=dy/Lmm,kind=e.kind??'frame'
     const kl=kind==='truss'?localKTruss(e.E,e.A,Lmm):localKFrame(e.E,e.A,e.I,Lmm)
-    const tr=T(c,s), kg=mm(mt(tr),mm(kl,tr))
-    const dofs=[3*i,3*i+1,3*i+2,3*j,3*j+1,3*j+2]
-    dofs.forEach((r,rr)=>dofs.forEach((cc,cc2)=>K[r][cc]+=kg[rr][cc2]))
-
     const q=kind==='frame'?(e.qy??0):0 // kN/m == N/mm numericamente
     const fl=kind==='frame'?[0,q*Lmm/2,q*Lmm*Lmm/12,0,q*Lmm/2,-q*Lmm*Lmm/12]:[0,0,0,0,0,0]
-    const fg=mm(mt(tr),fl.map(v=>[v])).map(r=>r[0])
+    const release=kind==='frame'?releasedFrameMatrices(kl,fl,!!e.releaseR1,!!e.releaseR2):{k:kl,f:fl,released:[] as number[]}
+    const kc=release.k,fc=release.f,released=release.released
+    const tr=T(c,s), kg=mm(mt(tr),mm(kc,tr))
+    const dofs=[3*i,3*i+1,3*i+2,3*j,3*j+1,3*j+2]
+    dofs.forEach((r,rr)=>dofs.forEach((cc,cc2)=>K[r][cc]+=kg[rr][cc2]))
+    const fg=mm(mt(tr),fc.map(v=>[v])).map(r=>r[0])
     dofs.forEach((dof,k)=>F[dof]+=fg[k])
-    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,dofs,fl,q})
+    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,kc,dofs,fl,fc,released,q})
   }
 
   const fixed:boolean[]=[]
   model.nodes.forEach(n=>{
     // Em nós exclusivamente de treliça a rotação não tem rigidez física: elimina-se o DOF rotacional.
-    const autoFixR=!frameConnected.has(n.id)
+    const autoFixR=!rotationallyConnected.has(n.id)
     fixed.push(!!n.fixX,!!n.fixY,!!n.fixR||autoFixR)
   })
 
   const free=fixed.map((f,i)=>!f?i:-1).filter(i=>i>=0)
-  if(!free.length) throw new Error('Não existem graus de liberdade livres.')
-  const Kff=free.map(i=>free.map(j=>K[i][j])), Ff=free.map(i=>F[i])
-  const uf=mm(inv(Kff),Ff.map(v=>[v])).map(r=>r[0]), U=Array<number>(nd).fill(0)
-  free.forEach((d,k)=>U[d]=uf[k])
+  const U=Array<number>(nd).fill(0)
+  if(free.length){
+    const Kff=free.map(i=>free.map(j=>K[i][j])), Ff=free.map(i=>F[i])
+    const uf=mm(inv(Kff),Ff.map(v=>[v])).map(r=>r[0])
+    free.forEach((d,k)=>U[d]=uf[k])
+  }
   const R=K.map((row,i)=>row.reduce((sum,v,j)=>sum+v*U[j],0)-F[i])
 
   const members:MemberResult[]=cache.map(ca=>{
-    const ug=ca.dofs.map(d=>U[d]), ul=mm(ca.tr,ug.map(v=>[v])).map(r=>r[0])
+    const ug=ca.dofs.map(d=>U[d]), ulCondensed=mm(ca.tr,ug.map(v=>[v])).map(r=>r[0])
+    const ul=ca.kind==='frame'?recoverReleasedLocalDisplacements(ca.kl,ca.fl,ulCondensed,ca.released):ulCondensed
     const fint=mm(ca.kl,ul.map(v=>[v])).map(r=>r[0]).map((v,k)=>v-ca.fl[k])
     return {
       id:ca.e.id,

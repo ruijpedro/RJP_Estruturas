@@ -1,91 +1,72 @@
-# RJP Structures V1.7.1
+# RJP Structures V1.7.2
 
-Aplicação Web/Android (React + Vite + Capacitor) para **Vigas + Pórticos 2D + Treliças 2D**, com motor MEF, dimensionamento modular em **Betão Armado segundo EC2**, seleção automática de armaduras e pormenorização esquemática. Toda a interface utiliza **Português de Portugal**.
+Aplicação WebApp/PWA + Android (React + Vite + Capacitor) para **Vigas, Pórticos 2D e Treliças 2D**, com motor MEF, Betão Armado/EC2, pormenorização esquemática e interface em **Português de Portugal**.
 
-## Novidades da V1.7
+## Novidades V1.7.2 — modelo criado de raiz
 
-A V1.7 concentra-se em três áreas: **acessibilidade**, **segurança do projeto** e **edição gráfica mais direta**.
+A geometria deixou de estar limitada aos modelos de exemplo. Agora é possível:
 
-### Acessibilidade
+- carregar em **Novo** e iniciar o tipo de modelo atual completamente em branco;
+- escolher **Nó** e tocar na grelha para criar nós com snap de 0,25 m;
+- escolher **Barra**, tocar no nó inicial e depois no nó final para criar uma barra;
+- usar **Mover** para alterar as coordenadas de um nó;
+- usar **Apagar** para eliminar barras e nós, além de forças, cargas distribuídas e apoios;
+- apagar um nó ligado a barras, com confirmação para remover também as barras associadas;
+- regressar ao modelo de exemplo em qualquer altura.
 
-- tamanho do texto da interface: 90%, 100%, 115%, 130% ou 145%;
-- tamanho independente dos rótulos do desenho técnico: 90% a 130%;
-- contraste reforçado;
-- botões e áreas de toque maiores para tablet;
-- preferências guardadas automaticamente.
+### Rótulas / libertações de rotação
 
-### Gravação automática e recuperação
+Foi acrescentada a ferramenta **Rótula**:
 
-- snapshot completo do projeto após alterações;
-- indicação da hora da última gravação automática;
-- recuperação manual da última cópia automática;
-- exportação/importação JSON continua disponível;
-- o JSON V1.7 pode incluir também preferências de interface e data de gravação.
+- ao ativá-la, aparecem pontos de seleção junto às duas extremidades das barras de pórtico;
+- tocar numa extremidade insere uma libertação de rotação;
+- tocar novamente remove a rótula e repõe a ligação rígida;
+- a barra selecionada também apresenta botões **Inserir/Remover rótula inicial/final** no painel de propriedades;
+- as rótulas fazem parte do modelo MEF, não são apenas símbolos gráficos.
 
-### Editor gráfico V1.7
+O motor usa condensação estática das rotações libertadas. Uma barra biarticulada sob carga uniforme apresenta momentos de extremidade nulos; uma barra encastrada-articulada transmite momento apenas na extremidade rígida.
 
-- **Selecionar**: seleção direta de barras;
-- **Apoio**: tocar num nó alterna entre Livre → Móvel → Articulado → Encastrado;
-- símbolos gráficos diferenciados para os tipos de apoio;
-- **Carga**: tocar num nó permite editar `Fx`, `Fy` e `Mz`;
-- **Carga**: tocar numa barra permite editar `qy` em kN/m;
-- **Apagar**: elimina forças nodais, cargas distribuídas ou apoios diretamente no modelo;
-- o MEF é recalculado imediatamente após cada alteração;
-- **Repor ações e apoios do modelo** restaura o modelo paramétrico inicial.
+## Edição gráfica
 
-As ferramentas **Nó / Barra / Mover** permanecem na barra para a evolução do editor livre; nesta versão ainda não criam ou deslocam geometria arbitrária.
+Ferramentas disponíveis:
 
-## Interface gráfica
+- **Selecionar** — escolher a barra ativa;
+- **Nó** — criar nós;
+- **Barra** — criar barras entre dois nós;
+- **Rótula** — inserir/remover libertações de rotação;
+- **Apoio** — Livre → Móvel → Articulado → Encastrado;
+- **Carga** — editar Fx/Fy/Mz num nó ou qy numa barra;
+- **Mover** — alterar coordenadas do nó;
+- **Apagar** — barras, nós, apoios e ações.
 
-Mantém o mockup aprovado:
+O cálculo é atualizado automaticamente sempre que o modelo permanece estável. Se a edição criar um mecanismo, a app apresenta a mensagem de instabilidade em vez de devolver resultados inválidos.
 
-- cabeçalho vermelho RJP com **Novo / Abrir / Guardar / Calcular / Relatório**;
-- barra lateral de ferramentas;
-- área de desenho com grelha técnica, eixos, cargas e apoios;
-- zoom 70%–200%;
-- **Grelha / Rótulos / Ações** configuráveis;
-- modo **Foco**;
+## Interface e acessibilidade
+
+Mantém:
+
+- interface integralmente PT-PT;
+- zoom 70–200%, grelha, rótulos e ações configuráveis;
+- modo Foco;
 - painel de propriedades recolhível;
-- **Desfazer / Refazer** das alterações paramétricas;
-- nome do projeto editável;
-- visualização de **N / V / M / Deformada** sobre o modelo;
-- quadro rápido de resultados;
-- navegação **Modelo / Cargas / Resultados / EC2 / Pormenorização / Relatório / Definições**.
+- tamanho do texto 90–145%;
+- escala independente dos textos do desenho;
+- contraste reforçado e áreas de toque maiores;
+- gravação automática, recuperação e JSON de projeto.
+
+Os ficheiros JSON V1.7.2 guardam também a geometria livre e as rótulas.
 
 ## Motor estrutural
 
-Unidades da interface:
+Unidades de entrada: geometria em m, ações em kN/kNm e q em kN/m. O solver trabalha internamente em N-mm, com `E` em MPa, `A` em mm² e `I` em mm⁴.
 
-- geometria: m;
-- forças: kN;
-- momentos: kNm;
-- cargas distribuídas: kN/m.
-
-Internamente o MEF trabalha em **N-mm**, coerente com `E` em MPa, `A` em mm² e `I` em mm⁴.
-
-O motor suporta elementos de pórtico plano 2D, elementos de treliça axiais, cargas nodais `Fx/Fy/Mz`, carga distribuída local `qy`, reações, deslocamentos, deformada, diagramas N/V/M e valores críticos ao longo da barra.
+Suporta elementos frame 2D e treliça, cargas nodais, cargas distribuídas locais, apoios, reações, deslocamentos, N/V/M, deformada e libertações rotacionais de extremidade.
 
 ## Betão Armado / EC2
 
-Mantém os módulos já implementados para:
+Mantêm-se os módulos de flexão, corte, armaduras mínimas/máximas, estribos, fissuração, deformação, tensões de serviço, recobrimento/durabilidade, ancoragens, emendas, pilares, lajes, punçoamento, sapatas, fadiga simplificada, pré-verificação de incêndio, pormenorização e mapa estimado de armaduras. Consulte `EC2_COVERAGE.md` para limitações e âmbito de cada módulo.
 
-- propriedades de betão e aço e resistências de cálculo;
-- flexão, `As,req`, `As,min`, `As,max`, `MRd`;
-- armaduras inferior/superior;
-- corte `VRd,c`, `VRd,s`, `VRd,max`;
-- estribos e zonas de apoio/vão;
-- torção/interação V+T;
-- fissuração e deformações;
-- tensões de serviço;
-- durabilidade e recobrimento;
-- espaçamentos, ancoragens e emendas;
-- pilares, lajes, punçoamento e sapatas;
-- fadiga simplificada e pré-verificação de incêndio;
-- desenho esquemático e mapa estimado de armaduras.
-
-Consulte `EC2_COVERAGE.md` para a cobertura e limitações do motor. Os módulos identificados como pré-verificação/triagem não substituem uma verificação normativa integral.
-
-## Build local
+## Build
 
 Requer Node >= 22.12 e < 25.
 
@@ -94,32 +75,25 @@ npm install --no-audit --no-fund
 npm run build
 ```
 
-## Android / GitHub Actions
+O workflow Android usa Node 24 + Java 21 e publica o artefacto:
 
-O workflow incluído usa Node 24, Java 21 e Capacitor 7, gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
+`RJP-Structures-V1.7.2-debug-apk`
 
-Artefacto esperado: `RJP-Structures-V1.7.1-debug-apk`.
+O workflow WebApp publica no GitHub Pages e gera:
 
-## Ficheiros principais
-
-- `src/App.tsx` — interface + integração MEF/EC2;
-- `src/structural.ts` — motor MEF 2D;
-- `src/ec2.ts` — motor EC2;
-- `src/styles.css` — interface gráfica e acessibilidade;
-- `.github/workflows/android.yml` — build Android;
-- `CHANGELOG_V1_7.md` — alterações desta versão;
-- `VALIDATION_V1_7.md` — validação desta versão;
-- `EC2_COVERAGE.md` — matriz de cobertura normativa.
-
+`RJP-Structures-V1.7.2-WebApp`
 
 ## WebApp / PWA
 
-A V1.7.1 pode ser distribuída simultaneamente como APK Android e WebApp instalável. A WebApp inclui `manifest.webmanifest`, service worker para utilização offline após a primeira visita e workflow `.github/workflows/webapp.yml` para publicação automática no GitHub Pages.
+A mesma base pode ser instalada como PWA em computador, tablet ou telemóvel e continua a gerar o APK Android. Para GitHub Pages, selecionar **Settings → Pages → Source: GitHub Actions**.
 
-### Publicar no GitHub Pages
-1. Enviar esta versão para o repositório.
-2. Abrir **Settings → Pages** no GitHub e escolher **GitHub Actions** como origem.
-3. Executar o workflow **WebApp GitHub Pages** (ou fazer push para `main`/`master`).
-4. No fim do workflow, o endereço da WebApp aparece no deployment `github-pages`.
+## Ficheiros principais
 
-A aplicação guarda projetos e preferências no armazenamento local do navegador. Continua disponível a exportação/importação JSON para cópias de segurança e transferência entre dispositivos.
+- `src/App.tsx` — editor, interface e integração MEF/EC2;
+- `src/structural.ts` — solver MEF e rótulas;
+- `src/ec2.ts` — verificações EC2;
+- `src/styles.css` — interface e acessibilidade;
+- `.github/workflows/android.yml` — APK;
+- `.github/workflows/webapp.yml` — WebApp;
+- `CHANGELOG_V1_7_2.md` — alterações desta versão;
+- `VALIDATION_V1_7_2.md` — ensaios efetuados.
