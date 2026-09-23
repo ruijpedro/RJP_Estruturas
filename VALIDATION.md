@@ -1,4 +1,4 @@
-# Validação rápida — RJP Structures V1.5
+# Validação rápida — RJP Structures V1.6
 
 ## Benchmark 1 — viga simplesmente apoiada
 
@@ -15,7 +15,7 @@ Solução analítica:
 - Vmax = 30,00 kN
 - Mmax = 45,00 kNm
 
-Resultado do motor V1.5:
+Resultado do motor V1.6:
 
 - R1 = 30,00 kN
 - R2 = 30,00 kN
@@ -43,7 +43,7 @@ Este teste confirma que o novo elemento `truss` trabalha apenas axialmente.
 
 ## Teste de TypeScript
 
-A V1.5 foi verificada com `tsc --strict` usando declarações locais mínimas de React para validar a sintaxe e a tipagem do código da aplicação sem depender do download de pacotes.
+A V1.6 foi verificada com `tsc --strict` usando declarações locais mínimas de React para validar a sintaxe e a tipagem do código da aplicação sem depender do download de pacotes.
 
 ## Nota
 

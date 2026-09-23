@@ -18,9 +18,62 @@ type Settings={
   trussSpan:number; trussHeight:number; trussP:number; trussA:number;
 }
 
-type ProjectFile={version:string;mode:Mode;settings:Settings}
+type LoadComponent='fx'|'fy'|'mz'
+type SupportOverride={nodeId:number;fixX:boolean;fixY:boolean;fixR:boolean}
+type NodalLoadOverride={nodeId:number;fx:number;fy:number;mz:number}
+type DistributedLoadOverride={elementId:number;qy:number}
+type ModelEdits={
+  removedSupports:number[]
+  removedNodalLoads:{nodeId:number;component:LoadComponent}[]
+  removedDistributedLoads:number[]
+  supportOverrides:SupportOverride[]
+  nodalLoadOverrides:NodalLoadOverride[]
+  distributedLoadOverrides:DistributedLoadOverride[]
+}
+type EditsByMode=Record<Mode,ModelEdits>
+type UiSettings={fontScale:number;canvasTextScale:number;highContrast:boolean;largeTargets:boolean}
+type ProjectFile={version:string;mode:Mode;settings:Settings;projectName?:string;edits?:EditsByMode;ui?:UiSettings;savedAt?:string}
 
 type RebarRow={mark:string;description:string;phi:number;qty:number;lengthM:number;weightKg:number}
+
+function emptyModelEdits():ModelEdits{return {removedSupports:[],removedNodalLoads:[],removedDistributedLoads:[],supportOverrides:[],nodalLoadOverrides:[],distributedLoadOverrides:[]}}
+function emptyEditsByMode():EditsByMode{return {'Viga':emptyModelEdits(),'Pórtico 2D':emptyModelEdits(),'Treliça 2D':emptyModelEdits()}}
+function normalizeModelEdits(v?:Partial<ModelEdits>):ModelEdits{
+  return {
+    removedSupports:v?.removedSupports??[],
+    removedNodalLoads:v?.removedNodalLoads??[],
+    removedDistributedLoads:v?.removedDistributedLoads??[],
+    supportOverrides:v?.supportOverrides??[],
+    nodalLoadOverrides:v?.nodalLoadOverrides??[],
+    distributedLoadOverrides:v?.distributedLoadOverrides??[]
+  }
+}
+function applyModelEdits(base:Model2D,edits:ModelEdits):Model2D{
+  const supportSet=new Set(edits.removedSupports)
+  const nodalSet=new Set(edits.removedNodalLoads.map(x=>`${x.nodeId}:${x.component}`))
+  const distSet=new Set(edits.removedDistributedLoads)
+  const supportMap=new Map(edits.supportOverrides.map(x=>[x.nodeId,x]))
+  const nodalMap=new Map(edits.nodalLoadOverrides.map(x=>[x.nodeId,x]))
+  const distMap=new Map(edits.distributedLoadOverrides.map(x=>[x.elementId,x.qy]))
+  return {
+    nodes:base.nodes.map(n=>{
+      const out={...n}
+      const support=supportMap.get(n.id)
+      if(support){out.fixX=support.fixX;out.fixY=support.fixY;out.fixR=support.fixR}
+      const load=nodalMap.get(n.id)
+      if(load){out.fx=load.fx;out.fy=load.fy;out.mz=load.mz}
+      if(supportSet.has(n.id)){out.fixX=false;out.fixY=false;out.fixR=false}
+      if(nodalSet.has(`${n.id}:fx`))out.fx=0
+      if(nodalSet.has(`${n.id}:fy`))out.fy=0
+      if(nodalSet.has(`${n.id}:mz`))out.mz=0
+      return out
+    }),
+    elements:base.elements.map(e=>{
+      const overridden=distMap.has(e.id)?{...e,qy:distMap.get(e.id)}:{...e}
+      return distSet.has(e.id)?{...overridden,qy:0}:overridden
+    })
+  }
+}
 
 const DEFAULT_SETTINGS:Settings={
   fck:30,fyk:500,cover:35,exposure:'XC2',cotTheta:1,
@@ -28,10 +81,11 @@ const DEFAULT_SETTINGS:Settings={
   frameWidth:5,frameHeight:3,frameQ:10,frameHLoad:12,colB:300,colH:300,
   trussSpan:6,trussHeight:3,trussP:20,trussA:2500
 }
+const DEFAULT_UI:UiSettings={fontScale:1,canvasTextScale:1,highContrast:false,largeTargets:false}
 
 function clamp(v:number,a:number,b:number){return Math.max(a,Math.min(b,v))}
 function fmt(v:number|undefined,d=2){return v!==undefined&&Number.isFinite(v)?v.toFixed(d):'—'}
-function statusLabel(s:EC2Check['status']){return s==='OK'?'✓ CUMPRE':s==='FAIL'?'✕ NÃO CUMPRE':s==='WARN'?'⚠ VERIFICAR':'— N/A'}
+function statusLabel(s:EC2Check['status']){return s==='OK'?'✓ CUMPRE':s==='FAIL'?'✕ NÃO CUMPRE':s==='WARN'?'⚠ VERIFICAR':'— NÃO VERIFICADO'}
 function maxAbs(values:number[]){return values.reduce((m,v)=>Math.max(m,Math.abs(v)),0)}
 function kgPerM(phi:number){return phi*phi/162}
 function barWeight(phi:number,qty:number,lengthM:number){return kgPerM(phi)*qty*lengthM}
@@ -108,7 +162,7 @@ function NumInput({label,value,onChange,unit,step=1,min}:{label:string;value:num
   return <label className="field"><span>{label}</span><div><input type="number" value={Number.isFinite(value)?value:''} step={step} min={min} onChange={(e:ChangeEvent<HTMLInputElement>)=>{const n=Number(e.target.value);if(Number.isFinite(n))onChange(min!==undefined?Math.max(min,n):n)}}/>{unit&&<small>{unit}</small>}</div></label>
 }
 
-function ModelView({model,result,selected,setSelected,diagram}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,diagram:CanvasResult}){
+function ModelView({model,result,selected,setSelected,diagram,zoom,setZoom,showGrid,showLabels,showLoads,tool,onDeleteSupport,onDeleteNodalLoad,onDeleteDistributedLoad,onCycleSupport,onEditNodalLoad,onEditDistributedLoad}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,diagram:CanvasResult,zoom:number,setZoom:(z:number)=>void,showGrid:boolean,showLabels:boolean,showLoads:boolean,tool:Tool,onDeleteSupport:(nodeId:number)=>void,onDeleteNodalLoad:(nodeId:number,component:LoadComponent)=>void,onDeleteDistributedLoad:(elementId:number)=>void,onCycleSupport:(nodeId:number)=>void,onEditNodalLoad:(nodeId:number)=>void,onEditDistributedLoad:(elementId:number)=>void}){
   const xs=model.nodes.map(n=>n.x),ys=model.nodes.map(n=>n.y),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys)
   const W=940,H=520,p=78,sx=(W-2*p)/Math.max(1,maxX-minX),sy=(H-2*p)/Math.max(1,maxY-minY||3),sc=Math.min(sx,sy)
   const P=(n:Node2D)=>({x:p+(n.x-minX)*sc,y:H-p-(n.y-minY)*sc})
@@ -139,19 +193,21 @@ function ModelView({model,result,selected,setSelected,diagram}:{model:Model2D,re
   }
   const selectedUnit=diagram==='M'?'kNm':'kN'
   const selectedFactor=diagram==='M'?1e6:1000
-  return <svg className="canvas" viewBox={`0 0 ${W} ${H}`}>
+  const safeZoom=clamp(zoom,.7,2)
+  const vbW=W/safeZoom,vbH=H/safeZoom,vbX=(W-vbW)/2,vbY=(H-vbH)/2
+  return <svg className="canvas" viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`} onWheel={(e:any)=>{e.preventDefault();setZoom(clamp(safeZoom+(e.deltaY<0?.1:-.1),.7,2))}} aria-label="Modelo estrutural e resultados gráficos">
     <defs>
       <pattern id="gridSmall" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e7eaed" strokeWidth="1"/></pattern>
       <pattern id="gridLarge" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#gridSmall)"/><path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cfd5da" strokeWidth="1.2"/></pattern>
       <marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c91c23"/></marker>
     </defs>
     <rect width="100%" height="100%" fill="#fbfcfd"/>
-    <rect width="100%" height="100%" fill="url(#gridLarge)"/>
+    {showGrid&&<rect width="100%" height="100%" fill="url(#gridLarge)"/>}
     <g opacity=".75"><line x1="35" y1={H-35} x2="88" y2={H-35} stroke="#17324b" strokeWidth="2"/><line x1="35" y1={H-35} x2="35" y2={H-88} stroke="#17324b" strokeWidth="2"/><text x="92" y={H-30} className="axisLabel">X</text><text x="26" y={H-92} className="axisLabel">Y</text></g>
-    {model.elements.map(e=>{const a=P(nodeMap.get(e.n1)!.n),b=P(nodeMap.get(e.n2)!.n);return <g key={e.id} onClick={()=>setSelected(e.id)} className="clickable"><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={selected===e.id?'#1e63b5':'#263b4d'} strokeWidth={selected===e.id?10:7} strokeLinecap="round"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d8d8d8" strokeWidth={selected===e.id?6:4} strokeLinecap="round"/><text x={(a.x+b.x)/2} y={(a.y+b.y)/2-13} className="memberLabel">B{e.id}</text>{e.qy&&<><line x1={a.x} y1={a.y-38} x2={b.x} y2={b.y-38} stroke="#c91c23" strokeWidth="2"/>{Array.from({length:8}).map((_,k)=>{const t=k/7,x=a.x+(b.x-a.x)*t,y=a.y+(b.y-a.y)*t;return <line key={k} x1={x} y1={y-38} x2={x} y2={y-8} stroke="#c91c23" strokeWidth="2" markerEnd="url(#arrowRed)"/>})}<text x={(a.x+b.x)/2} y={(a.y+b.y)/2-50} textAnchor="middle" className="loadLabel">q = {Math.abs(e.qy)} kN/m</text></>}</g>})}
+    {model.elements.map(e=>{const nA=nodeMap.get(e.n1)!.n,nB=nodeMap.get(e.n2)!.n,a=P(nA),b=P(nB),le=Math.hypot(nB.x-nA.x,nB.y-nA.y);return <g key={e.id} onClick={(ev)=>{if(tool==='Carga'){ev.stopPropagation();onEditDistributedLoad(e.id);return}setSelected(e.id)}} className={`clickable ${tool==='Carga'?'editTarget':''}`}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={selected===e.id?'#1e63b5':'#263b4d'} strokeWidth={selected===e.id?10:7} strokeLinecap="round"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d8d8d8" strokeWidth={selected===e.id?6:4} strokeLinecap="round"/>{showLabels&&<><text x={(a.x+b.x)/2} y={(a.y+b.y)/2-13} className="memberLabel">B{e.id}</text>{selected===e.id&&<text x={(a.x+b.x)/2} y={(a.y+b.y)/2+24} className="dimLabel">{fmt(le,2)} m</text>}</>}{showLoads&&!!e.qy&&<g className={tool==='Apagar'?'deleteTarget':''} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteDistributedLoad(e.id)}}}><line x1={a.x} y1={a.y-38} x2={b.x} y2={b.y-38} stroke="#c91c23" strokeWidth="2"/>{Array.from({length:8}).map((_,k)=>{const t=k/7,x=a.x+(b.x-a.x)*t,y=a.y+(b.y-a.y)*t;return <line key={k} x1={x} y1={y-38} x2={x} y2={y-8} stroke="#c91c23" strokeWidth="2" markerEnd="url(#arrowRed)"/>})}<text x={(a.x+b.x)/2} y={(a.y+b.y)/2-50} textAnchor="middle" className="loadLabel">q = {Math.abs(e.qy)} kN/m</text></g>}</g>})}
     {result&&diagram==='Deformada'&&model.elements.map(e=>{const a=DP(nodeMap.get(e.n1)!.n),b=DP(nodeMap.get(e.n2)!.n);return <line key={`def-${e.id}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1476d4" strokeWidth="3" strokeDasharray="8 6" opacity=".95"/>})}
     {result&&diagram!=='Deformada'&&diagramPoints&&<><polyline points={diagramPoints} fill="none" stroke="#c91c23" strokeWidth="3.5"/><text x={W-215} y="35" className="diagramLabel">{diagram}: máx. {fmt(diagramMax/selectedFactor,2)} {selectedUnit}</text></>}
-    {model.nodes.map(n=>{const pnt=P(n);return <g key={n.id}><circle cx={pnt.x} cy={pnt.y} r="8" fill="#fff" stroke="#263b4d" strokeWidth="3"/><text x={pnt.x+11} y={pnt.y-11} className="nodeLabel">N{n.id}</text>{(n.fixX||n.fixY||n.fixR)&&<><path d={`M ${pnt.x-18} ${pnt.y+20} L ${pnt.x+18} ${pnt.y+20} L ${pnt.x} ${pnt.y+5} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-24} y1={pnt.y+22} x2={pnt.x+24} y2={pnt.y+22} stroke="#263b4d" strokeWidth="2"/></>}{(n.fy??0)!==0&&<><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {Math.abs(n.fy??0)} kN</text></>}{(n.fx??0)!==0&&<><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/></>}</g>})}
+    {model.nodes.map(n=>{const pnt=P(n);const hasSupport=!!(n.fixX||n.fixY||n.fixR);return <g key={n.id} className={tool==='Apoio'||tool==='Carga'?'editTarget':''} onClick={(ev)=>{if(tool==='Apoio'){ev.stopPropagation();onCycleSupport(n.id)}else if(tool==='Carga'){ev.stopPropagation();onEditNodalLoad(n.id)}}}><circle cx={pnt.x} cy={pnt.y} r="8" fill="#fff" stroke="#263b4d" strokeWidth="3"/>{showLabels&&<text x={pnt.x+11} y={pnt.y-11} className="nodeLabel">N{n.id}</text>}{hasSupport&&<g className={`${tool==='Apagar'?'deleteTarget supportTarget':''} ${tool==='Apoio'?'editTarget':''}`} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteSupport(n.id)}}}>{n.fixR?<><rect x={pnt.x-18} y={pnt.y+5} width="36" height="18" fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-25} y1={pnt.y+25} x2={pnt.x+25} y2={pnt.y+25} stroke="#263b4d" strokeWidth="4"/></>:<><path d={`M ${pnt.x-18} ${pnt.y+20} L ${pnt.x+18} ${pnt.y+20} L ${pnt.x} ${pnt.y+5} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/>{!n.fixX&&n.fixY&&<><circle cx={pnt.x-10} cy={pnt.y+25} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><circle cx={pnt.x+10} cy={pnt.y+25} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><line x1={pnt.x-24} y1={pnt.y+31} x2={pnt.x+24} y2={pnt.y+31} stroke="#263b4d" strokeWidth="2"/></>}{n.fixX&&n.fixY&&<line x1={pnt.x-24} y1={pnt.y+22} x2={pnt.x+24} y2={pnt.y+22} stroke="#263b4d" strokeWidth="2"/>}</>}</g>}{showLoads&&(n.fy??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNodalLoad(n.id,'fy')}}}><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {Math.abs(n.fy??0)} kN</text></g>}{showLoads&&(n.fx??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNodalLoad(n.id,'fx')}}}><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x-68} y={pnt.y-10} className="loadLabel">H = {Math.abs(n.fx??0)} kN</text></g>}{showLoads&&(n.mz??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNodalLoad(n.id,'mz')}}}><path d={`M ${pnt.x-28} ${pnt.y-28} A 28 28 0 1 1 ${pnt.x+26} ${pnt.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3"/><text x={pnt.x+30} y={pnt.y-32} className="loadLabel">M = {Math.abs(n.mz??0)} kNm</text></g>}</g>})}
     {result&&diagram==='Deformada'&&<text x="18" y="28" className="deformLabel">Deformada ampliada ×{fmt(deformScale,1)}</text>}
   </svg>
 }
@@ -166,14 +222,40 @@ function Diagram({member,kind}:{member:MemberResult;kind:'N'|'V'|'M'}){
 function Checks({checks}:{checks:EC2Check[]}){return <div className="checks">{checks.map(c=><div className={`check ${c.status.toLowerCase()}`} key={c.id}><div><b>{c.title}</b><span>{c.note}</span></div><div className="checkvals">{c.demand!==undefined&&<small>{fmt(c.demand)} {c.unit}</small>}<strong>{statusLabel(c.status)}</strong>{c.utilization!==undefined&&Number.isFinite(c.utilization)&&<em>{fmt(c.utilization*100,0)}%</em>}</div></div>)}</div>}
 
 function RebarSection({b,h,cover,bottom,top}:{b:number;h:number;cover:number;bottom?:{phi:number,n:number};top?:{phi:number,n:number}}){
-  const W=330,H=280,p=30,s=Math.min((W-2*p)/b,(H-2*p)/h),rw=b*s,rh=h*s,x=(W-rw)/2,y=(H-rh)/2,bn=bottom?.n??4,tn=top?.n??2
+  const W=370,H=330,p=58,s=Math.min((W-2*p)/b,(H-2*p-35)/h),rw=b*s,rh=h*s,x=(W-rw)/2,y=35+(H-2*p-rh)/2,bn=bottom?.n??4,tn=top?.n??2
   const barLine=(n:number,yy:number,phi:number,keyPrefix:string)=>Array.from({length:n}).map((_,i)=>{const px=x+cover*s+12+i*(rw-2*cover*s-24)/Math.max(1,n-1);return <circle key={`${keyPrefix}-${i}`} cx={px} cy={yy} r={clamp(phi*s/2,4,8)} fill="#14324a"/>})
-  return <svg viewBox={`0 0 ${W} ${H}`} className="rebarSketch"><rect x={x} y={y} width={rw} height={rh} fill="#f7f7f7" stroke="#303840" strokeWidth="3"/><rect x={x+cover*s} y={y+cover*s} width={rw-2*cover*s} height={rh-2*cover*s} fill="none" stroke="#a80d19" strokeWidth="3" rx="4"/>{barLine(tn,y+cover*s+14,top?.phi??12,'t')}{barLine(bn,y+rh-cover*s-14,bottom?.phi??16,'b')}<text x={W/2} y={H-5} textAnchor="middle" fontSize="14">Corte · sup. {top?`${top.n}Ø${top.phi}`:'—'} · inf. {bottom?`${bottom.n}Ø${bottom.phi}`:'—'}</text></svg>
+  return <svg viewBox={`0 0 ${W} ${H}`} className="rebarSketch">
+    <defs><marker id="dimArrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse"><path d="M0,0 L6,3 L0,6 z" fill="#65717c"/></marker></defs>
+    <text x={W/2} y="22" textAnchor="middle" fontSize="15" fontWeight="800" fill="#1c3246">CORTE A-A</text>
+    <rect x={x} y={y} width={rw} height={rh} fill="#f4f4f2" stroke="#303840" strokeWidth="3"/>
+    <rect x={x+cover*s} y={y+cover*s} width={Math.max(5,rw-2*cover*s)} height={Math.max(5,rh-2*cover*s)} fill="none" stroke="#a80d19" strokeWidth="3" rx="4"/>
+    {barLine(tn,y+cover*s+14,top?.phi??12,'t')}{barLine(bn,y+rh-cover*s-14,bottom?.phi??16,'b')}
+    <line x1={x} y1={y+rh+24} x2={x+rw} y2={y+rh+24} stroke="#65717c" markerStart="url(#dimArrow)" markerEnd="url(#dimArrow)"/>
+    <line x1={x} y1={y+rh+8} x2={x} y2={y+rh+31} stroke="#65717c"/><line x1={x+rw} y1={y+rh+8} x2={x+rw} y2={y+rh+31} stroke="#65717c"/>
+    <text x={x+rw/2} y={y+rh+45} textAnchor="middle" fontSize="12" fill="#425466">b = {fmt(b,0)} mm</text>
+    <line x1={x-25} y1={y} x2={x-25} y2={y+rh} stroke="#65717c" markerStart="url(#dimArrow)" markerEnd="url(#dimArrow)"/>
+    <line x1={x-8} y1={y} x2={x-32} y2={y} stroke="#65717c"/><line x1={x-8} y1={y+rh} x2={x-32} y2={y+rh} stroke="#65717c"/>
+    <text x={x-38} y={y+rh/2} textAnchor="middle" fontSize="12" fill="#425466" transform={`rotate(-90 ${x-38} ${y+rh/2})`}>h = {fmt(h,0)} mm</text>
+    <text x={W/2} y={H-10} textAnchor="middle" fontSize="12" fill="#31475b">sup. {top?`${top.n}Ø${top.phi}`:'—'} · inf. {bottom?`${bottom.n}Ø${bottom.phi}`:'—'} · cnom {fmt(cover,0)} mm</text>
+  </svg>
 }
 
 function BeamElevation({L=6,bottom,top,endSt,midSt,zone=1}:{L?:number;bottom?:{phi:number,n:number};top?:{phi:number,n:number};endSt:string;midSt:string;zone:number}){
-  const total=570,ratio=clamp(zone/Math.max(L,0.1),.08,.35),zx=total*ratio
-  return <svg viewBox="0 0 680 270" className="rebarSketch"><rect x="55" y="55" width="570" height="120" fill="#f8f8f8" stroke="#303840" strokeWidth="3"/><line x1="75" y1="150" x2="605" y2="150" stroke="#14324a" strokeWidth="5"/><line x1="75" y1="80" x2="605" y2="80" stroke="#14324a" strokeWidth="4"/>{Array.from({length:22}).map((_,i)=><rect key={i} x={73+i*25} y="68" width="16" height="94" fill="none" stroke={i*25<zx||i*25>total-zx?'#a80d19':'#c26b73'} strokeWidth="2"/>)}<path d="M55 185 L75 215 L95 185 Z M585 185 L605 215 L625 185 Z" fill="#c3c8cd" stroke="#14324a"/><text x="340" y="35" textAnchor="middle" fontSize="18" fontWeight="700">ALÇADO ESQUEMÁTICO DA VIGA</text><text x="340" y="145" textAnchor="middle" fontSize="16">Inf. {bottom?`${bottom.n}Ø${bottom.phi}`:'—'}</text><text x="340" y="100" textAnchor="middle" fontSize="16">Sup. {top?`${top.n}Ø${top.phi}`:'—'}</text><text x="170" y="197" textAnchor="middle" fontSize="13">apoios: {endSt}</text><text x="340" y="197" textAnchor="middle" fontSize="13">vão: {midSt}</text><text x="510" y="197" textAnchor="middle" fontSize="13">apoios: {endSt}</text><text x="340" y="228" textAnchor="middle" fontSize="13">zonas de apoio ≈ {fmt(zone,2)} m</text><text x="340" y="250" textAnchor="middle" fontSize="14">L = {fmt(L,2)} m</text></svg>
+  const total=600,ratio=clamp(zone/Math.max(L,0.1),.08,.35),zx=total*ratio,x0=60,x1=x0+total,y0=58,y1=188
+  return <svg viewBox="0 0 720 325" className="rebarSketch">
+    <defs><marker id="dimArrowBeam" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto-start-reverse"><path d="M0,0 L6,3 L0,6 z" fill="#65717c"/></marker></defs>
+    <text x="360" y="28" textAnchor="middle" fontSize="18" fontWeight="800" fill="#1c3246">ALÇADO ESQUEMÁTICO DA VIGA</text>
+    <rect x={x0} y={y0} width={total} height={y1-y0} fill="#f4f4f2" stroke="#303840" strokeWidth="3"/>
+    <line x1={x0+20} y1="158" x2={x1-20} y2="158" stroke="#14324a" strokeWidth="5"/><line x1={x0+20} y1="85" x2={x1-20} y2="85" stroke="#14324a" strokeWidth="4"/>
+    {Array.from({length:25}).map((_,i)=>{const xx=x0+18+i*24;return <rect key={i} x={xx} y="72" width="15" height="101" fill="none" stroke={xx-x0<zx||xx-x0>total-zx?'#a80d19':'#c26b73'} strokeWidth="2"/>})}
+    <path d={`M${x0} 198 L${x0+20} 225 L${x0+40} 198 Z M${x1-40} 198 L${x1-20} 225 L${x1} 198 Z`} fill="#c3c8cd" stroke="#14324a"/>
+    <line x1={x0+zx} y1="48" x2={x0+zx} y2="196" stroke="#50708c" strokeDasharray="6 5"/><text x={x0+zx} y="45" textAnchor="middle" fontSize="12" fontWeight="800" fill="#36536d">A-A</text>
+    <line x1={x1-zx} y1="48" x2={x1-zx} y2="196" stroke="#50708c" strokeDasharray="6 5"/><text x={x1-zx} y="45" textAnchor="middle" fontSize="12" fontWeight="800" fill="#36536d">B-B</text>
+    <text x="360" y="150" textAnchor="middle" fontSize="15" fill="#14324a">Inf. {bottom?`${bottom.n}Ø${bottom.phi}`:'—'}</text><text x="360" y="104" textAnchor="middle" fontSize="15" fill="#14324a">Sup. {top?`${top.n}Ø${top.phi}`:'—'}</text>
+    <text x="155" y="211" textAnchor="middle" fontSize="12" fill="#8a1620">apoio: {endSt}</text><text x="360" y="211" textAnchor="middle" fontSize="12" fill="#425466">vão: {midSt}</text><text x="565" y="211" textAnchor="middle" fontSize="12" fill="#8a1620">apoio: {endSt}</text>
+    <line x1={x0} y1="260" x2={x1} y2="260" stroke="#65717c" markerStart="url(#dimArrowBeam)" markerEnd="url(#dimArrowBeam)"/><line x1={x0} y1="238" x2={x0} y2="268" stroke="#65717c"/><line x1={x1} y1="238" x2={x1} y2="268" stroke="#65717c"/>
+    <text x="360" y="281" textAnchor="middle" fontSize="13" fill="#425466">L = {fmt(L,2)} m</text><text x="360" y="304" textAnchor="middle" fontSize="12" fill="#65717c">zonas reforçadas junto aos apoios ≈ {fmt(zone,2)} m</text>
+  </svg>
 }
 
 function ColumnSketch({b,h,cover,bars,tieSpacing}:{b:number;h:number;cover:number;bars:{phi:number,n:number};tieSpacing:number}){return <div><RebarSection b={b} h={h} cover={cover} bottom={bars} top={bars}/><svg viewBox="0 0 300 300" className="rebarSketch"><rect x="100" y="25" width="100" height="235" fill="#f8f8f8" stroke="#303840" strokeWidth="3"/>{Array.from({length:12}).map((_,i)=><rect key={i} x="112" y={40+i*17} width="76" height="12" fill="none" stroke="#a80d19" strokeWidth="2"/>)}<line x1="120" y1="35" x2="120" y2="250" stroke="#14324a" strokeWidth="5"/><line x1="180" y1="35" x2="180" y2="250" stroke="#14324a" strokeWidth="5"/><text x="150" y="280" textAnchor="middle" fontSize="13">{bars.n}Ø{bars.phi} · cintas Ø8/{fmt(tieSpacing,0)}</text></svg></div>}
@@ -184,20 +266,126 @@ function RebarSchedule({rows}:{rows:RebarRow[]}){
 }
 
 export default function App(){
-  const [mode,setMode]=useState<Mode>('Viga')
+  const [mode,setMode]=useState<Mode>(()=>{const saved=localStorage.getItem('rjp-structures-mode-v17')||localStorage.getItem('rjp-structures-mode-v16');return saved==='Viga'||saved==='Pórtico 2D'||saved==='Treliça 2D'?saved:'Viga'})
   const [selected,setSelected]=useState(1)
   const [tab,setTab]=useState<Tab>('Modelo')
   const [tool,setTool]=useState<Tool>('Selecionar')
   const [canvasResult,setCanvasResult]=useState<CanvasResult>('M')
+  const [panelCollapsed,setPanelCollapsed]=useState(false)
+  const [focusMode,setFocusMode]=useState(false)
+  const [zoom,setZoom]=useState(1)
+  const [showGrid,setShowGrid]=useState(true)
+  const [showLabels,setShowLabels]=useState(true)
+  const [showLoads,setShowLoads]=useState(true)
+  const [projectName,setProjectName]=useState(()=>localStorage.getItem('rjp-structures-project-name-v17')||localStorage.getItem('rjp-structures-project-name-v16')||'Projeto estrutural')
+  const [ui,setUi]=useState<UiSettings>(()=>{try{const raw=localStorage.getItem('rjp-structures-ui-v17');return raw?{...DEFAULT_UI,...JSON.parse(raw)}:DEFAULT_UI}catch{return DEFAULT_UI}})
+  const [lastAutoSave,setLastAutoSave]=useState<string>(()=>localStorage.getItem('rjp-structures-autosave-time-v17')||'')
+  const [history,setHistory]=useState<Settings[]>([])
+  const [future,setFuture]=useState<Settings[]>([])
   const [settings,setSettings]=useState<Settings>(()=>{
-    try{const raw=localStorage.getItem('rjp-structures-v15');if(raw)return {...DEFAULT_SETTINGS,...JSON.parse(raw)}}catch{}
+    try{const raw=localStorage.getItem('rjp-structures-v17')||localStorage.getItem('rjp-structures-v16')||localStorage.getItem('rjp-structures-v15');if(raw)return {...DEFAULT_SETTINGS,...JSON.parse(raw)}}catch{}
     return DEFAULT_SETTINGS
   })
+  const [modelEdits,setModelEdits]=useState<EditsByMode>(()=>{
+    try{
+      const raw=localStorage.getItem('rjp-structures-model-edits-v17')||localStorage.getItem('rjp-structures-model-edits-v161')
+      if(raw){
+        const parsed=JSON.parse(raw) as Partial<EditsByMode>
+        return {
+          'Viga':normalizeModelEdits(parsed['Viga']),
+          'Pórtico 2D':normalizeModelEdits(parsed['Pórtico 2D']),
+          'Treliça 2D':normalizeModelEdits(parsed['Treliça 2D'])
+        }
+      }
+    }catch{}
+    return emptyEditsByMode()
+  })
 
-  useEffect(()=>{localStorage.setItem('rjp-structures-v15',JSON.stringify(settings))},[settings])
-  const set=(k:keyof Settings,v:number|string)=>setSettings(s=>({...s,[k]:v}))
+  useEffect(()=>{localStorage.setItem('rjp-structures-v17',JSON.stringify(settings))},[settings])
+  useEffect(()=>{localStorage.setItem('rjp-structures-model-edits-v17',JSON.stringify(modelEdits))},[modelEdits])
+  useEffect(()=>{localStorage.setItem('rjp-structures-project-name-v17',projectName)},[projectName])
+  useEffect(()=>{localStorage.setItem('rjp-structures-mode-v17',mode)},[mode])
+  useEffect(()=>{localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui));document.documentElement.style.setProperty('--ui-scale',String(ui.fontScale));document.documentElement.style.setProperty('--canvas-scale',String(ui.canvasTextScale))},[ui])
+  useEffect(()=>{
+    const timer=window.setTimeout(()=>{
+      const savedAt=new Date().toISOString()
+      const snapshot:ProjectFile={version:'1.7.0',mode,settings,projectName,edits:modelEdits,ui,savedAt}
+      localStorage.setItem('rjp-structures-autosave-v17',JSON.stringify(snapshot))
+      localStorage.setItem('rjp-structures-autosave-time-v17',savedAt)
+      setLastAutoSave(savedAt)
+    },650)
+    return()=>window.clearTimeout(timer)
+  },[mode,settings,projectName,modelEdits,ui])
+  function commitSettings(next:Settings){
+    if(JSON.stringify(next)===JSON.stringify(settings))return
+    setHistory(h=>[...h.slice(-49),settings]);setFuture([]);setSettings(next)
+  }
+  function reactivateLoadForSetting(k:keyof Settings){
+    setModelEdits(prev=>{
+      const cur=prev[mode],next:ModelEdits={...cur,removedNodalLoads:[...cur.removedNodalLoads],removedDistributedLoads:[...cur.removedDistributedLoads],removedSupports:[...cur.removedSupports],supportOverrides:[...cur.supportOverrides],nodalLoadOverrides:[...cur.nodalLoadOverrides],distributedLoadOverrides:[...cur.distributedLoadOverrides]}
+      if(mode==='Viga'&&k==='beamQ'){next.removedDistributedLoads=next.removedDistributedLoads.filter(id=>id!==1&&id!==2);next.distributedLoadOverrides=next.distributedLoadOverrides.filter(x=>x.elementId!==1&&x.elementId!==2)}
+      if(mode==='Viga'&&k==='beamP'){next.removedNodalLoads=next.removedNodalLoads.filter(x=>!(x.nodeId===2&&x.component==='fy'));next.nodalLoadOverrides=next.nodalLoadOverrides.filter(x=>x.nodeId!==2)}
+      if(mode==='Pórtico 2D'&&k==='frameQ'){next.removedDistributedLoads=next.removedDistributedLoads.filter(id=>id!==2);next.distributedLoadOverrides=next.distributedLoadOverrides.filter(x=>x.elementId!==2)}
+      if(mode==='Pórtico 2D'&&k==='frameHLoad'){next.removedNodalLoads=next.removedNodalLoads.filter(x=>!(x.nodeId===3&&x.component==='fx'));next.nodalLoadOverrides=next.nodalLoadOverrides.filter(x=>x.nodeId!==3)}
+      if(mode==='Treliça 2D'&&k==='trussP'){next.removedNodalLoads=next.removedNodalLoads.filter(x=>!(x.nodeId===2&&x.component==='fy'));next.nodalLoadOverrides=next.nodalLoadOverrides.filter(x=>x.nodeId!==2)}
+      return {...prev,[mode]:next}
+    })
+  }
+  const set=(k:keyof Settings,v:number|string)=>{reactivateLoadForSetting(k);commitSettings({...settings,[k]:v} as Settings)}
+  function editCurrentModel(mutator:(current:ModelEdits)=>ModelEdits){
+    setModelEdits(prev=>({...prev,[mode]:mutator(prev[mode])}))
+  }
+  function deleteSupport(nodeId:number){
+    editCurrentModel(cur=>cur.removedSupports.includes(nodeId)?cur:{...cur,removedSupports:[...cur.removedSupports,nodeId]})
+  }
+  function deleteNodalLoad(nodeId:number,component:LoadComponent){
+    editCurrentModel(cur=>cur.removedNodalLoads.some(x=>x.nodeId===nodeId&&x.component===component)?cur:{...cur,removedNodalLoads:[...cur.removedNodalLoads,{nodeId,component}]})
+  }
+  function deleteDistributedLoad(elementId:number){
+    editCurrentModel(cur=>cur.removedDistributedLoads.includes(elementId)?cur:{...cur,removedDistributedLoads:[...cur.removedDistributedLoads,elementId]})
+  }
+  function restoreModeLoadsAndSupports(){setModelEdits(prev=>({...prev,[mode]:emptyModelEdits()}))}
+  function cycleSupport(nodeId:number){
+    const node=model.nodes.find(n=>n.id===nodeId);if(!node)return
+    const states=[{fixX:false,fixY:false,fixR:false},{fixX:false,fixY:true,fixR:false},{fixX:true,fixY:true,fixR:false},{fixX:true,fixY:true,fixR:true}]
+    const idx=states.findIndex(x=>x.fixX===!!node.fixX&&x.fixY===!!node.fixY&&x.fixR===!!node.fixR)
+    const next=states[(idx<0?0:idx+1)%states.length]
+    editCurrentModel(cur=>({...cur,removedSupports:cur.removedSupports.filter(id=>id!==nodeId),supportOverrides:[...cur.supportOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,...next}]}))
+  }
+  function editNodalLoad(nodeId:number){
+    const node=model.nodes.find(n=>n.id===nodeId);if(!node)return
+    const raw=window.prompt('Ações no nó em kN/kNm: Fx, Fy, Mz\nExemplo: 10, -25, 0',`${node.fx??0}, ${node.fy??0}, ${node.mz??0}`)
+    if(raw===null)return
+    const parts=raw.split(/[;,\s]+/).filter(Boolean).map(Number)
+    if(parts.length<3||parts.some(v=>!Number.isFinite(v))){alert('Introduza três valores válidos: Fx, Fy, Mz.');return}
+    const [fx,fy,mz]=parts
+    editCurrentModel(cur=>({...cur,
+      removedNodalLoads:cur.removedNodalLoads.filter(x=>x.nodeId!==nodeId),
+      nodalLoadOverrides:[...cur.nodalLoadOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,fx,fy,mz}]
+    }))
+  }
+  function editDistributedLoad(elementId:number){
+    const element=model.elements.find(e=>e.id===elementId);if(!element)return
+    const raw=window.prompt('Carga distribuída local qy [kN/m].\nUse valor negativo para baixo.',String(element.qy??0))
+    if(raw===null)return
+    const qy=Number(raw.replace(',','.'))
+    if(!Number.isFinite(qy)){alert('Introduza um valor numérico válido.');return}
+    editCurrentModel(cur=>({...cur,
+      removedDistributedLoads:cur.removedDistributedLoads.filter(id=>id!==elementId),
+      distributedLoadOverrides:[...cur.distributedLoadOverrides.filter(x=>x.elementId!==elementId),{elementId,qy}]
+    }))
+  }
+  function undo(){
+    const previous=history[history.length-1];if(!previous)return
+    setFuture(f=>[settings,...f].slice(0,50));setHistory(h=>h.slice(0,-1));setSettings(previous)
+  }
+  function redo(){
+    const next=future[0];if(!next)return
+    setHistory(h=>[...h.slice(-49),settings]);setFuture(f=>f.slice(1));setSettings(next)
+  }
 
-  const model=useMemo(()=>makeModel(mode,settings),[mode,settings])
+  const baseModel=useMemo(()=>makeModel(mode,settings),[mode,settings])
+  const model=useMemo(()=>applyModelEdits(baseModel,modelEdits[mode]),[baseModel,modelEdits,mode])
   useEffect(()=>{if(!model.elements.some(e=>e.id===selected))setSelected(model.elements[0]?.id??1)},[model,selected])
 
   const analysis=useMemo<AnalysisState>(()=>{
@@ -242,7 +430,9 @@ export default function App(){
 
   const nodeIndex=new Map(model.nodes.map((n,i)=>[n.id,i]))
   const checks=beamFinal?.checks??col?.checks??[]
-  const ok=checks.filter(c=>c.status==='OK').length,fail=checks.filter(c=>c.status==='FAIL').length,warn=checks.filter(c=>c.status==='WARN').length
+  const ok=checks.filter(c=>c.status==='OK').length,fail=checks.filter(c=>c.status==='FAIL').length,warn=checks.filter(c=>c.status==='WARN').length,na=checks.filter(c=>c.status==='NA').length
+  const overallState=checks.length?(fail?'NÃO CUMPRE':warn?'VERIFICAR':'CUMPRE'):'NÃO VERIFICADO'
+  const overallClass=fail?'bad':warn?'caution':checks.length?'good':'muted'
   const endStLabel=stirrupEnd?`${stirrupEnd.legs}r Ø${stirrupEnd.phi}/${stirrupEnd.spacing}`:'—'
   const midStLabel=stirrupMid?`${stirrupMid.legs}r Ø${stirrupMid.phi}/${stirrupMid.spacing}`:'—'
   const zone=beamFinal?Math.min(length/4,Math.max(.5,2*beamFinal.flex.d/1000)):0
@@ -274,20 +464,47 @@ export default function App(){
     ]
   },[col,colBars,sec,length])
 
+  const selectedSchedule=isColumn?columnSchedule:beamSchedule
+  const steelTotal=selectedSchedule.reduce((sum,row)=>sum+row.weightKg,0)
+
+  function applyProjectFile(p:ProjectFile){
+    if(p.settings){setHistory(h=>[...h.slice(-49),settings]);setFuture([]);setSettings({...DEFAULT_SETTINGS,...p.settings})}
+    if(p.edits){setModelEdits({'Viga':normalizeModelEdits(p.edits['Viga']),'Pórtico 2D':normalizeModelEdits(p.edits['Pórtico 2D']),'Treliça 2D':normalizeModelEdits(p.edits['Treliça 2D'])})}
+    if(p.mode)setMode(p.mode)
+    if(p.projectName)setProjectName(p.projectName)
+    if(p.ui)setUi({...DEFAULT_UI,...p.ui})
+  }
   function saveProject(){
-    localStorage.setItem('rjp-structures-v15',JSON.stringify(settings))
-    localStorage.setItem('rjp-structures-mode-v15',mode)
+    localStorage.setItem('rjp-structures-v17',JSON.stringify(settings))
+    localStorage.setItem('rjp-structures-mode-v17',mode)
+    localStorage.setItem('rjp-structures-project-name-v17',projectName)
+    localStorage.setItem('rjp-structures-model-edits-v17',JSON.stringify(modelEdits))
+    localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui))
+    const now=new Date().toISOString();setLastAutoSave(now);localStorage.setItem('rjp-structures-autosave-time-v17',now)
   }
   function exportProject(){
-    const file:ProjectFile={version:'1.5.0',mode,settings}
+    const file:ProjectFile={version:'1.7.0',mode,settings,projectName,edits:modelEdits,ui,savedAt:new Date().toISOString()}
     const blob=new Blob([JSON.stringify(file,null,2)],{type:'application/json'})
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='RJP_Structures_Project.json';a.click();URL.revokeObjectURL(a.href)
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${projectName.replace(/[^a-z0-9_-]+/gi,'_')||'RJP_Structures'}_V1_7.json`;a.click();URL.revokeObjectURL(a.href)
   }
   function importProject(e:ChangeEvent<HTMLInputElement>){
     const f=e.target.files?.[0];if(!f)return
-    const reader=new FileReader();reader.onload=()=>{try{const p=JSON.parse(String(reader.result)) as ProjectFile;if(p.settings)setSettings({...DEFAULT_SETTINGS,...p.settings});if(p.mode)setMode(p.mode)}catch{alert('Ficheiro de projeto inválido.')}};reader.readAsText(f);e.target.value=''
+    const reader=new FileReader();reader.onload=()=>{try{applyProjectFile(JSON.parse(String(reader.result)) as ProjectFile)}catch{alert('Ficheiro de projeto inválido.')}};reader.readAsText(f);e.target.value=''
   }
-  function resetProject(){setSettings(DEFAULT_SETTINGS);setMode('Viga');setSelected(1);setTab('Modelo')}
+  function recoverAutosave(){
+    try{const raw=localStorage.getItem('rjp-structures-autosave-v17');if(!raw){alert('Não existe uma cópia automática disponível.');return}applyProjectFile(JSON.parse(raw) as ProjectFile)}catch{alert('Não foi possível recuperar a cópia automática.')}
+  }
+  function resetProject(){setHistory(h=>[...h.slice(-49),settings]);setFuture([]);setSettings(DEFAULT_SETTINGS);setModelEdits(emptyEditsByMode());setMode('Viga');setSelected(1);setTab('Modelo');setZoom(1)}
+
+  useEffect(()=>{
+    const onKey=(e:KeyboardEvent)=>{
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveProject()}
+      if(e.key==='Escape'&&focusMode)setFocusMode(false)
+    }
+    window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey)
+  },[history,future,settings,mode,projectName,focusMode])
 
   const toolIcons:Record<Tool,string>={Selecionar:'↖',Nó:'○',Barra:'╱',Apoio:'△',Carga:'↓',Mover:'✥',Apagar:'⌫'}
   const bottomTabs:{tab:Tab;icon:string;label:string}[]=[
@@ -300,7 +517,7 @@ export default function App(){
     {tab:'Definições',icon:'⚙',label:'Definições'}
   ]
 
-  return <div className="app mockupApp">
+  return <div className={`app mockupApp ${ui.highContrast?'highContrast':''} ${ui.largeTargets?'largeTargets':''}`}>
     <header className="topHeader">
       <div className="brandBlock"><img src="./icons/ic_launcher.png" alt="RJP Structures"/><div><b>RJP Structures</b><span>ANALISAR · DIMENSIONAR · PORMENORIZAR</span></div></div>
       <div className="topActions">
@@ -313,23 +530,35 @@ export default function App(){
     </header>
 
     <div className="modelStrip">
-      <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setTab('Modelo')}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
-      <div className="projectTitle"><strong>Projeto estrutural</strong><span>EC2 · MEF 2D · PT-PT</span></div>
-      <div className="versionPill">V1.5</div>
+      <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setTab('Modelo');setZoom(1)}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
+      <div className="projectTitle"><input className="projectNameInput" value={projectName} onChange={(e:any)=>setProjectName(e.target.value)} aria-label="Nome do projeto"/><span>EC2 · MEF 2D · Português de Portugal</span></div>
+      <div className="historyActions" aria-label="Histórico de edição"><button onClick={undo} disabled={!history.length} title="Desfazer (Ctrl+Z)">↶</button><button onClick={redo} disabled={!future.length} title="Refazer (Ctrl+Y)">↷</button></div>
+      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.0</div>
     </div>
 
-    <main className="studioLayout">
+    <main className={`studioLayout ${panelCollapsed?'panelCollapsed':''} ${focusMode?'focusMode':''}`}>
       <aside className="leftToolbar" aria-label="Ferramentas de desenho">
         {(['Selecionar','Nó','Barra','Apoio','Carga','Mover','Apagar'] as Tool[]).map(t=><button key={t} className={tool===t?'active':''} onClick={()=>setTool(t)} title={t}><span className="toolIcon">{toolIcons[t]}</span><small>{t}</small></button>)}
       </aside>
 
       <section className="workspace mockupWorkspace">
         <div className="canvasHeader">
-          <div><strong>{mode}</strong><span> · Elemento selecionado: B{selected}</span></div>
-          <div className="resultSwitch">{(['N','V','M','Deformada'] as CanvasResult[]).map(r=><button key={r} className={canvasResult===r?'active':''} onClick={()=>setCanvasResult(r)}>{r}</button>)}</div>
+          <div className="canvasTitle"><strong>{mode}</strong><span> · Elemento selecionado: B{selected}</span></div>
+          <div className="canvasControls">
+            <div className="resultSwitch">{(['N','V','M','Deformada'] as CanvasResult[]).map(r=><button key={r} className={canvasResult===r?'active':''} onClick={()=>setCanvasResult(r)}>{r}</button>)}</div>
+            <div className="viewportTools">
+              <button className={showGrid?'active':''} onClick={()=>setShowGrid(v=>!v)} title="Mostrar/ocultar grelha">Grelha</button>
+              <button className={showLabels?'active':''} onClick={()=>setShowLabels(v=>!v)} title="Mostrar/ocultar identificações">Rótulos</button>
+              <button className={showLoads?'active':''} onClick={()=>setShowLoads(v=>!v)} title="Mostrar/ocultar ações">Ações</button>
+              <span className="toolDivider"/>
+              <button onClick={()=>setZoom(z=>clamp(z-.1,.7,2))} title="Reduzir">−</button><span className="zoomReadout">{fmt(zoom*100,0)}%</span><button onClick={()=>setZoom(z=>clamp(z+.1,.7,2))} title="Ampliar">＋</button>
+              <button onClick={()=>setZoom(1)} title="Ajustar ao modelo">Ajustar</button>
+              <button className={focusMode?'active':''} onClick={()=>setFocusMode(v=>!v)} title="Modo de concentração">{focusMode?'Sair':'Foco'}</button>
+            </div>
+          </div>
         </div>
-        <ModelView model={model} result={result} selected={selected} setSelected={setSelected} diagram={canvasResult}/>
-        <div className="canvasStatus"><span><b>Ferramenta:</b> {tool}</span><span><b>Modelo:</b> {mode}</span><span><b>Cálculo:</b> {analysis.ok?'atualizado automaticamente':'verificar modelo'}</span></div>
+        <ModelView model={model} result={result} selected={selected} setSelected={setSelected} diagram={canvasResult} zoom={zoom} setZoom={setZoom} showGrid={showGrid} showLabels={showLabels} showLoads={showLoads} tool={tool} onDeleteSupport={deleteSupport} onDeleteNodalLoad={deleteNodalLoad} onDeleteDistributedLoad={deleteDistributedLoad} onCycleSupport={cycleSupport} onEditNodalLoad={editNodalLoad} onEditDistributedLoad={editDistributedLoad}/>
+        <div className="canvasStatus"><span><b>Ferramenta:</b> {tool}</span>{tool==='Apagar'&&<span className="deleteHint"><b>Apagar:</b> toque numa força, carga distribuída ou apoio</span>}{tool==='Apoio'&&<span className="editHint"><b>Apoio:</b> toque num nó para alterar o vínculo</span>}{tool==='Carga'&&<span className="editHint"><b>Carga:</b> toque num nó ou numa barra</span>}<span><b>Nós:</b> {model.nodes.length}</span><span><b>Barras:</b> {model.elements.length}</span><span><b>Zoom:</b> {fmt(zoom*100,0)}%</span><span><b>Cálculo:</b> {analysis.ok?'atualizado automaticamente':'verificar modelo'}</span></div>
         <div className="quickResults">
           <div><span>MEd</span><b>{isTruss?'—':`${fmt(med)} kNm`}</b></div>
           <div><span>VEd</span><b>{isTruss?'—':`${fmt(ved)} kN`}</b></div>
@@ -338,12 +567,12 @@ export default function App(){
           <div><span>As,sup</span><b>{topBars?`${fmt(topBars.area,0)} mm²`:'—'}</b></div>
           <div><span>Estribos</span><b>{beamFinal?endStLabel:'—'}</b></div>
           <div><span>Fissuração</span><b className={beamFinal?.checks.some(c=>c.id.includes('crack')&&c.status==='FAIL')?'bad':'good'}>{beamFinal?`${fmt(beamFinal.crack.wk,3)} mm`:'—'}</b></div>
-          <div><span>Estado</span><b className={fail?'bad':'good'}>{checks.length?(fail?'VERIFICAR':'CUMPRE'):'—'}</b></div>
+          <div><span>Estado</span><b className={overallClass}>{overallState}</b></div>
         </div>
       </section>
 
-      <aside className="propertiesPanel">
-        <div className="panelTitle"><div><h2>Propriedades</h2><span>{isTruss?'Barra de treliça':isColumn?'Pilar':'Viga'} B{selected}</span></div><span className="collapseMark">⌃</span></div>
+      <aside className={`propertiesPanel ${panelCollapsed?'collapsed':''}`}>
+        <div className="panelTitle"><div><h2>Propriedades</h2><span>{isTruss?'Barra de treliça':isColumn?'Pilar':'Viga'} B{selected}</span></div><button className="collapseButton" onClick={()=>setPanelCollapsed(v=>!v)} title={panelCollapsed?'Abrir painel de propriedades':'Recolher painel de propriedades'}>{panelCollapsed?'‹':'›'}</button></div>
 
         <div className="selectedSummary">
           <div><span>Comprimento</span><b>{fmt(length)} m</b></div>
@@ -355,7 +584,7 @@ export default function App(){
           {mode==='Viga'&&<div className="fields singleColumn"><NumInput label="Vão total" value={settings.beamSpan} onChange={v=>set('beamSpan',v)} unit="m" step={0.1} min={1}/><NumInput label="Largura b" value={settings.beamB} onChange={v=>set('beamB',v)} unit="mm" step={10} min={100}/><NumInput label="Altura h" value={settings.beamH} onChange={v=>set('beamH',v)} unit="mm" step={10} min={150}/></div>}
           {mode==='Pórtico 2D'&&<div className="fields singleColumn"><NumInput label="Vão" value={settings.frameWidth} onChange={v=>set('frameWidth',v)} unit="m" step={0.1} min={1}/><NumInput label="Altura" value={settings.frameHeight} onChange={v=>set('frameHeight',v)} unit="m" step={0.1} min={1}/><NumInput label="Viga b" value={settings.beamB} onChange={v=>set('beamB',v)} unit="mm" step={10} min={100}/><NumInput label="Viga h" value={settings.beamH} onChange={v=>set('beamH',v)} unit="mm" step={10} min={150}/><NumInput label="Pilar b" value={settings.colB} onChange={v=>set('colB',v)} unit="mm" step={10} min={150}/><NumInput label="Pilar h" value={settings.colH} onChange={v=>set('colH',v)} unit="mm" step={10} min={150}/></div>}
           {mode==='Treliça 2D'&&<div className="fields singleColumn"><NumInput label="Vão" value={settings.trussSpan} onChange={v=>set('trussSpan',v)} unit="m" step={0.1} min={1}/><NumInput label="Altura" value={settings.trussHeight} onChange={v=>set('trussHeight',v)} unit="m" step={0.1} min={.5}/><NumInput label="Área da barra" value={settings.trussA} onChange={v=>set('trussA',v)} unit="mm²" step={100} min={100}/></div>}
-          <div className="card info compact"><b>Edição gráfica</b><p>Selecione barras diretamente no desenho. Os comandos Nó, Barra, Apoio, Carga, Mover e Apagar já integram a nova barra visual; a edição paramétrica mantém os cálculos sincronizados.</p></div>
+          <div className="card info compact"><b>Editor gráfico V1.7</b><p>A seleção é feita diretamente no desenho. Em <b>Apoio</b>, toque num nó para alternar Livre → Móvel → Articulado → Encastrado. Em <b>Carga</b>, toque num nó ou numa barra para editar ações. Em <b>Apagar</b>, toque no símbolo a remover. O cálculo é atualizado imediatamente.</p></div>
         </>}
 
         {tab==='Cargas'&&<>
@@ -363,7 +592,7 @@ export default function App(){
           {mode==='Viga'&&<div className="fields singleColumn"><NumInput label="Carga distribuída q" value={settings.beamQ} onChange={v=>set('beamQ',v)} unit="kN/m" step={0.5} min={0}/><NumInput label="Carga concentrada P" value={settings.beamP} onChange={v=>set('beamP',v)} unit="kN" step={1} min={0}/></div>}
           {mode==='Pórtico 2D'&&<div className="fields singleColumn"><NumInput label="Carga distribuída na viga" value={settings.frameQ} onChange={v=>set('frameQ',v)} unit="kN/m" step={0.5} min={0}/><NumInput label="Ação horizontal" value={settings.frameHLoad} onChange={v=>set('frameHLoad',v)} unit="kN" step={1} min={0}/></div>}
           {mode==='Treliça 2D'&&<div className="fields singleColumn"><NumInput label="Carga vertical P" value={settings.trussP} onChange={v=>set('trussP',v)} unit="kN" step={1} min={0}/></div>}
-          <div className="card compact"><b>Atualização automática</b><p>Ao alterar uma ação, o modelo MEF e os valores EC2 são recalculados imediatamente.</p></div>
+          <div className="card compact"><b>Edição gráfica de ações e apoios</b><p>Use <b>Carga</b> para tocar num nó e introduzir Fx, Fy e Mz, ou toque numa barra para definir qy. Use <b>Apoio</b> para mudar o vínculo de um nó. Com <b>Apagar</b>, elimina diretamente o símbolo selecionado.</p><button className="secondary inlineAction" onClick={restoreModeLoadsAndSupports}>Repor ações e apoios do modelo</button></div>
         </>}
 
         {tab==='Resultados'&&<>
@@ -373,7 +602,7 @@ export default function App(){
 
         {tab==='EC2'&&<>
           <h3>Verificações EC2</h3>
-          {sec?<><div className="summary"><span className="ok">{ok} cumpre</span><span className="fail">{fail} não cumpre</span><span className="warn">{warn} verificar</span></div>{beamFinal&&<><div className="card compact"><b>Dimensionamento da viga</b><p>M+ = {fmt(moments.positive)} · M− = {fmt(moments.negative)} kNm</p><p>Inferior: {bottomBars?`${bottomBars.n}Ø${bottomBars.phi} = ${fmt(bottomBars.area,0)} mm²`:'—'}</p><p>Superior: {topBars?`${topBars.n}Ø${topBars.phi} = ${fmt(topBars.area,0)} mm²`:'—'}</p><p>Estribos apoio: {endStLabel}</p><p>Estribos vão: {midStLabel}</p><p>wk = {fmt(beamFinal.crack.wk,3)} mm · δ = {fmt(beamFinal.deflection.delta,2)} mm</p><p>lbd = {fmt(beamFinal.anchorage.lbd,0)} mm · l0 = {fmt(beamFinal.anchorage.l0,0)} mm</p></div><Checks checks={beamFinal.checks}/></>}{col&&<><div className="card compact"><b>Dimensionamento do pilar</b><p>NEd = {fmt(ned)} kN · MEd = {fmt(col.MEd)} kNm</p><p>Armadura: {colBars?`${colBars.n}Ø${colBars.phi} = ${fmt(colBars.area,0)} mm²`:'—'}</p><p>λ = {fmt(col.lambda,1)} · λlim = {fmt(col.lambdaLim,1)}</p><p>Interação N-M = {fmt(col.interaction*100,0)}%</p><p>Cintas: Ø8/{fmt(col.tieSpacing,0)} mm</p></div><Checks checks={col.checks}/></>}</>:<div className="card">O EC2 aplica-se aos elementos de betão armado.</div>}
+          {sec?<><div className="summary"><span className="ok">{ok} cumpre</span><span className="fail">{fail} não cumpre</span><span className="warn">{warn} verificar</span><span className="na">{na} não verificado</span></div>{beamFinal&&<><div className="card compact"><b>Dimensionamento da viga</b><p>M+ = {fmt(moments.positive)} · M− = {fmt(moments.negative)} kNm</p><p>Inferior: {bottomBars?`${bottomBars.n}Ø${bottomBars.phi} = ${fmt(bottomBars.area,0)} mm²`:'—'}</p><p>Superior: {topBars?`${topBars.n}Ø${topBars.phi} = ${fmt(topBars.area,0)} mm²`:'—'}</p><p>Estribos apoio: {endStLabel}</p><p>Estribos vão: {midStLabel}</p><p>wk = {fmt(beamFinal.crack.wk,3)} mm · δ = {fmt(beamFinal.deflection.delta,2)} mm</p><p>lbd = {fmt(beamFinal.anchorage.lbd,0)} mm · l0 = {fmt(beamFinal.anchorage.l0,0)} mm</p></div><Checks checks={beamFinal.checks}/></>}{col&&<><div className="card compact"><b>Dimensionamento do pilar</b><p>NEd = {fmt(ned)} kN · MEd = {fmt(col.MEd)} kNm</p><p>Armadura: {colBars?`${colBars.n}Ø${colBars.phi} = ${fmt(colBars.area,0)} mm²`:'—'}</p><p>λ = {fmt(col.lambda,1)} · λlim = {fmt(col.lambdaLim,1)}</p><p>Interação N-M = {fmt(col.interaction*100,0)}%</p><p>Cintas: Ø8/{fmt(col.tieSpacing,0)} mm</p></div><Checks checks={col.checks}/></>}</>:<div className="card">O EC2 aplica-se aos elementos de betão armado.</div>}
           <details className="ec2Modules"><summary>Módulos adicionais EC2</summary><div className="card compact"><b>Laje · faixa de 1 m</b><p>As,req = {fmt(slab.flex.AsReq,0)} mm²/m · wk = {fmt(slab.crack.wk,3)} mm</p></div><div className="card compact"><b>Punçoamento</b><p>u1 = {fmt(punch.u1,0)} mm · vEd = {fmt(punch.vEd,3)} MPa · vRd,c = {fmt(punch.vRdc,3)} MPa</p></div><div className="card compact"><b>Sapata isolada</b><p>qEd = {fmt(footing.qEd,1)} kN/m² · Mx = {fmt(footing.Mx,1)} kNm · My = {fmt(footing.My,1)} kNm</p></div><div className="card compact"><b>Fadiga e incêndio</b><p>Fadiga: {statusLabel(fatigue.checks[0].status)}</p><p>Incêndio R60: {fire?statusLabel(fire.check.status):'—'}</p></div></details>
         </>}
 
@@ -383,18 +612,26 @@ export default function App(){
         </>}
 
         {tab==='Relatório'&&<>
-          <h3>Relatório de cálculo</h3><div className="card report"><b>RJP Structures · Elemento B{selected}</b><p>Modelo: {mode} · Tipo: {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p><p>Materiais: {sec?`C${settings.fck} · aço ${settings.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p><hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Sem verificações EC2 para este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
+          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.0 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p><p><b>Materiais:</b> {sec?`C${settings.fck} · aço fyk ${settings.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
         </>}
 
         {tab==='Definições'&&<>
           <h3>Materiais e durabilidade</h3>
-          {!isTruss&&<div className="fields singleColumn"><NumInput label="Resistência característica do betão fck" value={settings.fck} onChange={v=>set('fck',v)} unit="MPa" min={12}/><NumInput label="Tensão de cedência do aço fyk" value={settings.fyk} onChange={v=>set('fyk',v)} unit="MPa" min={200}/><NumInput label="Recobrimento" value={settings.cover} onChange={v=>set('cover',v)} unit="mm" min={10}/><NumInput label="cot θ" value={settings.cotTheta} onChange={v=>set('cotTheta',clamp(v,1,2.5))} step={0.1} min={1}/><label className="field"><span>Classe de exposição</span><select value={settings.exposure} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setSettings(s=>({...s,exposure:e.target.value as ExposureClass}))}>{(['X0','XC1','XC2','XC3','XC4','XD1','XD2','XD3','XS1','XS2','XS3'] as ExposureClass[]).map(x=><option key={x}>{x}</option>)}</select></label></div>}
-          <h3>Projeto</h3><div className="projectActions"><button onClick={saveProject}>Guardar localmente</button><button onClick={exportProject}>Exportar projeto JSON</button><label className="fileBtn">Importar projeto JSON<input type="file" accept="application/json" onChange={importProject}/></label><button className="secondary" onClick={resetProject}>Repor exemplo</button></div>
+          {!isTruss&&<div className="fields singleColumn"><NumInput label="Resistência característica do betão fck" value={settings.fck} onChange={v=>set('fck',v)} unit="MPa" min={12}/><NumInput label="Tensão de cedência do aço fyk" value={settings.fyk} onChange={v=>set('fyk',v)} unit="MPa" min={200}/><NumInput label="Recobrimento" value={settings.cover} onChange={v=>set('cover',v)} unit="mm" min={10}/><NumInput label="cot θ" value={settings.cotTheta} onChange={v=>set('cotTheta',clamp(v,1,2.5))} step={0.1} min={1}/><label className="field"><span>Classe de exposição</span><select value={settings.exposure} onChange={(e:ChangeEvent<HTMLSelectElement>)=>commitSettings({...settings,exposure:e.target.value as ExposureClass})}>{(['X0','XC1','XC2','XC3','XC4','XD1','XD2','XD3','XS1','XS2','XS3'] as ExposureClass[]).map(x=><option key={x}>{x}</option>)}</select></label></div>}
+          <h3>Acessibilidade</h3>
+          <div className="card compact accessibilityCard">
+            <label className="field"><span>Tamanho do texto da interface</span><select value={ui.fontScale} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setUi(v=>({...v,fontScale:Number(e.target.value)}))}><option value={0.9}>Pequeno — 90%</option><option value={1}>Normal — 100%</option><option value={1.15}>Grande — 115%</option><option value={1.3}>Muito grande — 130%</option><option value={1.45}>Extra grande — 145%</option></select></label>
+            <label className="field"><span>Texto do desenho técnico</span><select value={ui.canvasTextScale} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setUi(v=>({...v,canvasTextScale:Number(e.target.value)}))}><option value={0.9}>90%</option><option value={1}>100%</option><option value={1.15}>115%</option><option value={1.3}>130%</option></select></label>
+            <label className="toggleRow"><input type="checkbox" checked={ui.highContrast} onChange={e=>setUi(v=>({...v,highContrast:e.target.checked}))}/><span>Contraste reforçado</span></label>
+            <label className="toggleRow"><input type="checkbox" checked={ui.largeTargets} onChange={e=>setUi(v=>({...v,largeTargets:e.target.checked}))}/><span>Botões e áreas de toque maiores</span></label>
+          </div>
+          <h3>Visualização e atalhos</h3><div className="card compact"><p><b>Grelha:</b> {showGrid?'visível':'oculta'} · <b>Rótulos:</b> {showLabels?'visíveis':'ocultos'} · <b>Ações:</b> {showLoads?'visíveis':'ocultas'}</p><p><b>Atalhos:</b> Ctrl+Z desfazer · Ctrl+Y refazer · Ctrl+S guardar · Esc sair do modo Foco.</p></div>
+          <h3>Projeto e segurança</h3><div className="card compact autosaveCard"><b>Gravação automática</b><p>{lastAutoSave?`Última cópia: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'A primeira cópia será criada após uma alteração.'}</p><button className="secondary inlineAction" onClick={recoverAutosave}>Recuperar última cópia automática</button></div><div className="projectActions"><button onClick={saveProject}>Guardar localmente</button><button onClick={exportProject}>Exportar projeto JSON</button><label className="fileBtn">Importar projeto JSON<input type="file" accept="application/json" onChange={importProject}/></label><button className="secondary" onClick={resetProject}>Repor exemplo</button></div>
         </>}
       </aside>
     </main>
 
     <nav className="bottomNav">{bottomTabs.map(x=><button key={x.tab} className={tab===x.tab?'active':''} onClick={()=>setTab(x.tab)}><span>{x.icon}</span><small>{x.label}</small></button>)}</nav>
-    <footer>RJP Structures V1.5 · interface PT-PT · MEF 2D · Betão Armado EC2 · pormenorização esquemática</footer>
+    <footer>RJP Structures V1.7.0 · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
   </div>
 }

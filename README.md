@@ -1,26 +1,56 @@
-# RJP Structures V1.5.1
+# RJP Structures V1.7.0
 
-Aplicação Web/Android (React + Vite + Capacitor) para **Vigas + Pórticos 2D + Treliças 2D**, com motor MEF, dimensionamento modular em **Betão Armado segundo EC2**, seleção automática de armaduras e pormenorização esquemática.
+Aplicação Web/Android (React + Vite + Capacitor) para **Vigas + Pórticos 2D + Treliças 2D**, com motor MEF, dimensionamento modular em **Betão Armado segundo EC2**, seleção automática de armaduras e pormenorização esquemática. Toda a interface utiliza **Português de Portugal**.
 
-## V1.5 — nova interface gráfica
+## Novidades da V1.7
 
-A V1.5 aplica o mockup aprovado à aplicação e uniformiza a linguagem para **Português de Portugal**.
+A V1.7 concentra-se em três áreas: **acessibilidade**, **segurança do projeto** e **edição gráfica mais direta**.
 
-Principais alterações:
+### Acessibilidade
+
+- tamanho do texto da interface: 90%, 100%, 115%, 130% ou 145%;
+- tamanho independente dos rótulos do desenho técnico: 90% a 130%;
+- contraste reforçado;
+- botões e áreas de toque maiores para tablet;
+- preferências guardadas automaticamente.
+
+### Gravação automática e recuperação
+
+- snapshot completo do projeto após alterações;
+- indicação da hora da última gravação automática;
+- recuperação manual da última cópia automática;
+- exportação/importação JSON continua disponível;
+- o JSON V1.7 pode incluir também preferências de interface e data de gravação.
+
+### Editor gráfico V1.7
+
+- **Selecionar**: seleção direta de barras;
+- **Apoio**: tocar num nó alterna entre Livre → Móvel → Articulado → Encastrado;
+- símbolos gráficos diferenciados para os tipos de apoio;
+- **Carga**: tocar num nó permite editar `Fx`, `Fy` e `Mz`;
+- **Carga**: tocar numa barra permite editar `qy` em kN/m;
+- **Apagar**: elimina forças nodais, cargas distribuídas ou apoios diretamente no modelo;
+- o MEF é recalculado imediatamente após cada alteração;
+- **Repor ações e apoios do modelo** restaura o modelo paramétrico inicial.
+
+As ferramentas **Nó / Barra / Mover** permanecem na barra para a evolução do editor livre; nesta versão ainda não criam ou deslocam geometria arbitrária.
+
+## Interface gráfica
+
+Mantém o mockup aprovado:
 
 - cabeçalho vermelho RJP com **Novo / Abrir / Guardar / Calcular / Relatório**;
-- barra lateral de ferramentas com **Selecionar / Nó / Barra / Apoio / Carga / Mover / Apagar**;
-- área de desenho maior, com grelha técnica, eixos, cargas e apoios;
-- seleção direta das barras no desenho;
-- visualização sobre o modelo de **N / V / M / Deformada**;
-- quadro rápido de resultados sob o modelo;
-- painel direito de propriedades e dimensionamento;
-- navegação inferior: **Modelo / Cargas / Resultados / EC2 / Pormenorização / Relatório / Definições**;
-- termos técnicos revistos para PT-PT: **betão, varões, estribos, recobrimento, esforço transverso, pormenorização, cumpre / não cumpre**, etc.;
-- interface responsiva para PC e tablet;
-- manutenção dos módulos de vigas, pórticos e treliças e do motor EC2 existente.
-
-> A barra gráfica de ferramentas já está integrada na V1.5. A edição geométrica continua essencialmente paramétrica nesta versão; o passo seguinte é transformar Nó/Barra/Apoio/Carga/Mover/Apagar num editor livre completo sobre o desenho.
+- barra lateral de ferramentas;
+- área de desenho com grelha técnica, eixos, cargas e apoios;
+- zoom 70%–200%;
+- **Grelha / Rótulos / Ações** configuráveis;
+- modo **Foco**;
+- painel de propriedades recolhível;
+- **Desfazer / Refazer** das alterações paramétricas;
+- nome do projeto editável;
+- visualização de **N / V / M / Deformada** sobre o modelo;
+- quadro rápido de resultados;
+- navegação **Modelo / Cargas / Resultados / EC2 / Pormenorização / Relatório / Definições**.
 
 ## Motor estrutural
 
@@ -33,44 +63,27 @@ Unidades da interface:
 
 Internamente o MEF trabalha em **N-mm**, coerente com `E` em MPa, `A` em mm² e `I` em mm⁴.
 
-O motor suporta:
-
-- elementos de pórtico plano 2D;
-- elementos de treliça exclusivamente axiais;
-- cargas nodais `Fx`, `Fy`, `Mz`;
-- carga distribuída local `qy` em elementos de pórtico;
-- reações;
-- deslocamentos;
-- deformada;
-- diagramas N/V/M;
-- valores críticos amostrados ao longo da barra.
+O motor suporta elementos de pórtico plano 2D, elementos de treliça axiais, cargas nodais `Fx/Fy/Mz`, carga distribuída local `qy`, reações, deslocamentos, deformada, diagramas N/V/M e valores críticos ao longo da barra.
 
 ## Betão Armado / EC2
 
-Inclui atualmente:
+Mantém os módulos já implementados para:
 
-- propriedades do betão e do aço;
-- resistências de cálculo;
-- flexão simples em vigas/lajes;
-- `As,req`, `As,min`, `As,max`, `MRd`;
-- momentos positivos/negativos e armaduras inferior/superior;
+- propriedades de betão e aço e resistências de cálculo;
+- flexão, `As,req`, `As,min`, `As,max`, `MRd`;
+- armaduras inferior/superior;
 - corte `VRd,c`, `VRd,s`, `VRd,max`;
-- seleção automática de estribos e zonas de apoio/vão;
-- torção e interação V+T em secções retangulares;
-- fissuração `wk`;
-- deformações por rigidez efetiva + fluência;
-- tensões de serviço no betão e no aço;
-- durabilidade/recobrimento X0/XC/XD/XS;
+- estribos e zonas de apoio/vão;
+- torção/interação V+T;
+- fissuração e deformações;
+- tensões de serviço;
+- durabilidade e recobrimento;
 - espaçamentos, ancoragens e emendas;
-- pilares: armadura mínima/máxima, esbelteza, 2.ª ordem, cintas e interação N-M de triagem;
-- lajes por faixa de 1 m;
-- punçoamento;
-- sapatas;
-- fadiga simplificada;
-- pré-verificação de incêndio;
+- pilares, lajes, punçoamento e sapatas;
+- fadiga simplificada e pré-verificação de incêndio;
 - desenho esquemático e mapa estimado de armaduras.
 
-Casos especializados continuam identificados no ficheiro `EC2_COVERAGE.md` e não devem ser interpretados como verificação normativa integral quando o motor os marca como pré-verificação/triagem.
+Consulte `EC2_COVERAGE.md` para a cobertura e limitações do motor. Os módulos identificados como pré-verificação/triagem não substituem uma verificação normativa integral.
 
 ## Build local
 
@@ -83,32 +96,17 @@ npm run build
 
 ## Android / GitHub Actions
 
-O workflow incluído executa:
+O workflow incluído usa Node 24, Java 21 e Capacitor 7, gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-```text
-Node 24
-→ npm install
-→ TypeScript + Vite
-→ Capacitor Android
-→ geração dos ícones
-→ Gradle assembleDebug
-→ upload do APK
-```
-
-O artefacto chama-se `RJP-Structures-V1.5.1-debug-apk`.
+Artefacto esperado: `RJP-Structures-V1.7.0-debug-apk`.
 
 ## Ficheiros principais
 
 - `src/App.tsx` — interface + integração MEF/EC2;
 - `src/structural.ts` — motor MEF 2D;
-- `src/ec2.ts` — motor de dimensionamento/verificações;
-- `src/styles.css` — interface gráfica V1.5;
+- `src/ec2.ts` — motor EC2;
+- `src/styles.css` — interface gráfica e acessibilidade;
 - `.github/workflows/android.yml` — build Android;
-- `VALIDATION.md` — benchmarks básicos;
+- `CHANGELOG_V1_7.md` — alterações desta versão;
+- `VALIDATION_V1_7.md` — validação desta versão;
 - `EC2_COVERAGE.md` — matriz de cobertura normativa.
-
-
-## Correção V1.5.1 — ícone adaptativo Android
-
-Foi corrigida a falha de compilação AAPT causada pela ausência do recurso `ic_launcher_background`.
-A versão inclui `assets/icon-background.png` e uma salvaguarda no workflow que cria o recurso de cor e atualiza os XML dos ícones adaptativos antes do Gradle.

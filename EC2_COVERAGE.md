@@ -1,4 +1,4 @@
-# RJP Structures — Matriz EC2 V1.5
+# RJP Structures — Matriz EC2 V1.6
 
 | Módulo | Estado | Observação |
 |---|---|---|
@@ -23,7 +23,7 @@
 | Interação N-M de pilares | Triagem conservadora | `N/NRd + M/MRd`; diagrama completo continua recomendado |
 | Flexão biaxial | Motor base | função de interação simplificada; requer validação específica |
 | Lajes | Implementado base | faixa de 1 m |
-| Punçoamento | Implementado base | `u1 / vEd / vRd,c / vRd,max`; `u1` corrigido na V1.5 |
+| Punçoamento | Implementado base | `u1 / vEd / vRd,c / vRd,max`; `u1` mantido corrigido na V1.6 |
 | Sapatas | Implementado base | flexão X/Y + punçoamento |
 | Fadiga | Pré-verificação | requer espectro/ciclos para cálculo detalhado |
 | Incêndio | Pré-verificação | confirmar pela EN 1992-1-2 |
