@@ -35,6 +35,7 @@ type UiSettings={fontScale:number;canvasTextScale:number;highContrast:boolean;la
 type ProjectFile={version:string;mode:Mode;settings:Settings;projectName?:string;edits?:EditsByMode;ui?:UiSettings;savedAt?:string}
 
 type RebarRow={mark:string;description:string;phi:number;qty:number;lengthM:number;weightKg:number}
+type InstallPromptEvent=Event&{prompt:()=>Promise<void>;userChoice:Promise<{outcome:'accepted'|'dismissed';platform:string}>}
 
 function emptyModelEdits():ModelEdits{return {removedSupports:[],removedNodalLoads:[],removedDistributedLoads:[],supportOverrides:[],nodalLoadOverrides:[],distributedLoadOverrides:[]}}
 function emptyEditsByMode():EditsByMode{return {'Viga':emptyModelEdits(),'Pórtico 2D':emptyModelEdits(),'Treliça 2D':emptyModelEdits()}}
@@ -286,6 +287,8 @@ export default function App(){
     try{const raw=localStorage.getItem('rjp-structures-v17')||localStorage.getItem('rjp-structures-v16')||localStorage.getItem('rjp-structures-v15');if(raw)return {...DEFAULT_SETTINGS,...JSON.parse(raw)}}catch{}
     return DEFAULT_SETTINGS
   })
+  const [installPrompt,setInstallPrompt]=useState<InstallPromptEvent|null>(null)
+  const [webAppInstalled,setWebAppInstalled]=useState(()=>window.matchMedia?.('(display-mode: standalone)').matches===true)
   const [modelEdits,setModelEdits]=useState<EditsByMode>(()=>{
     try{
       const raw=localStorage.getItem('rjp-structures-model-edits-v17')||localStorage.getItem('rjp-structures-model-edits-v161')
@@ -301,6 +304,19 @@ export default function App(){
     return emptyEditsByMode()
   })
 
+  useEffect(()=>{
+    const onPrompt=(event:Event)=>{event.preventDefault();setInstallPrompt(event as InstallPromptEvent)}
+    const onInstalled=()=>{setWebAppInstalled(true);setInstallPrompt(null)}
+    window.addEventListener('beforeinstallprompt',onPrompt)
+    window.addEventListener('appinstalled',onInstalled)
+    return()=>{window.removeEventListener('beforeinstallprompt',onPrompt);window.removeEventListener('appinstalled',onInstalled)}
+  },[])
+  async function installWebApp(){
+    if(!installPrompt)return
+    await installPrompt.prompt()
+    const choice=await installPrompt.userChoice
+    if(choice.outcome==='accepted')setInstallPrompt(null)
+  }
   useEffect(()=>{localStorage.setItem('rjp-structures-v17',JSON.stringify(settings))},[settings])
   useEffect(()=>{localStorage.setItem('rjp-structures-model-edits-v17',JSON.stringify(modelEdits))},[modelEdits])
   useEffect(()=>{localStorage.setItem('rjp-structures-project-name-v17',projectName)},[projectName])
@@ -309,7 +325,7 @@ export default function App(){
   useEffect(()=>{
     const timer=window.setTimeout(()=>{
       const savedAt=new Date().toISOString()
-      const snapshot:ProjectFile={version:'1.7.0',mode,settings,projectName,edits:modelEdits,ui,savedAt}
+      const snapshot:ProjectFile={version:'1.7.1',mode,settings,projectName,edits:modelEdits,ui,savedAt}
       localStorage.setItem('rjp-structures-autosave-v17',JSON.stringify(snapshot))
       localStorage.setItem('rjp-structures-autosave-time-v17',savedAt)
       setLastAutoSave(savedAt)
@@ -483,7 +499,7 @@ export default function App(){
     const now=new Date().toISOString();setLastAutoSave(now);localStorage.setItem('rjp-structures-autosave-time-v17',now)
   }
   function exportProject(){
-    const file:ProjectFile={version:'1.7.0',mode,settings,projectName,edits:modelEdits,ui,savedAt:new Date().toISOString()}
+    const file:ProjectFile={version:'1.7.1',mode,settings,projectName,edits:modelEdits,ui,savedAt:new Date().toISOString()}
     const blob=new Blob([JSON.stringify(file,null,2)],{type:'application/json'})
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${projectName.replace(/[^a-z0-9_-]+/gi,'_')||'RJP_Structures'}_V1_7.json`;a.click();URL.revokeObjectURL(a.href)
   }
@@ -533,7 +549,7 @@ export default function App(){
       <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setTab('Modelo');setZoom(1)}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
       <div className="projectTitle"><input className="projectNameInput" value={projectName} onChange={(e:any)=>setProjectName(e.target.value)} aria-label="Nome do projeto"/><span>EC2 · MEF 2D · Português de Portugal</span></div>
       <div className="historyActions" aria-label="Histórico de edição"><button onClick={undo} disabled={!history.length} title="Desfazer (Ctrl+Z)">↶</button><button onClick={redo} disabled={!future.length} title="Refazer (Ctrl+Y)">↷</button></div>
-      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.0</div>
+      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.1</div>
     </div>
 
     <main className={`studioLayout ${panelCollapsed?'panelCollapsed':''} ${focusMode?'focusMode':''}`}>
@@ -612,7 +628,7 @@ export default function App(){
         </>}
 
         {tab==='Relatório'&&<>
-          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.0 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p><p><b>Materiais:</b> {sec?`C${settings.fck} · aço fyk ${settings.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
+          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.1 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p><p><b>Materiais:</b> {sec?`C${settings.fck} · aço fyk ${settings.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
         </>}
 
         {tab==='Definições'&&<>
@@ -626,12 +642,13 @@ export default function App(){
             <label className="toggleRow"><input type="checkbox" checked={ui.largeTargets} onChange={e=>setUi(v=>({...v,largeTargets:e.target.checked}))}/><span>Botões e áreas de toque maiores</span></label>
           </div>
           <h3>Visualização e atalhos</h3><div className="card compact"><p><b>Grelha:</b> {showGrid?'visível':'oculta'} · <b>Rótulos:</b> {showLabels?'visíveis':'ocultos'} · <b>Ações:</b> {showLoads?'visíveis':'ocultas'}</p><p><b>Atalhos:</b> Ctrl+Z desfazer · Ctrl+Y refazer · Ctrl+S guardar · Esc sair do modo Foco.</p></div>
+          <h3>WebApp</h3><div className="card compact webAppCard"><b>{webAppInstalled?'WebApp instalada':'Instalação no dispositivo'}</b><p>{webAppInstalled?'A RJP Structures está a correr como aplicação instalada. Os projetos continuam guardados localmente neste dispositivo.':'Podes instalar esta versão no computador, tablet ou telemóvel diretamente a partir do navegador. Depois da primeira utilização online, os ficheiros essenciais ficam disponíveis offline.'}</p>{installPrompt&&!webAppInstalled&&<button className="inlineAction" onClick={installWebApp}>Instalar RJP Structures</button>} {!installPrompt&&!webAppInstalled&&<p className="smallHint">Se o botão não aparecer, usa o menu do navegador e escolhe “Instalar aplicação” ou “Adicionar ao ecrã principal”, quando disponível.</p>}</div>
           <h3>Projeto e segurança</h3><div className="card compact autosaveCard"><b>Gravação automática</b><p>{lastAutoSave?`Última cópia: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'A primeira cópia será criada após uma alteração.'}</p><button className="secondary inlineAction" onClick={recoverAutosave}>Recuperar última cópia automática</button></div><div className="projectActions"><button onClick={saveProject}>Guardar localmente</button><button onClick={exportProject}>Exportar projeto JSON</button><label className="fileBtn">Importar projeto JSON<input type="file" accept="application/json" onChange={importProject}/></label><button className="secondary" onClick={resetProject}>Repor exemplo</button></div>
         </>}
       </aside>
     </main>
 
     <nav className="bottomNav">{bottomTabs.map(x=><button key={x.tab} className={tab===x.tab?'active':''} onClick={()=>setTab(x.tab)}><span>{x.icon}</span><small>{x.label}</small></button>)}</nav>
-    <footer>RJP Structures V1.7.0 · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
+    <footer>RJP Structures V1.7.1 · WebApp + Android · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
   </div>
 }

@@ -1,4 +1,4 @@
-# RJP Structures V1.7.0
+# RJP Structures V1.7.1
 
 Aplicação Web/Android (React + Vite + Capacitor) para **Vigas + Pórticos 2D + Treliças 2D**, com motor MEF, dimensionamento modular em **Betão Armado segundo EC2**, seleção automática de armaduras e pormenorização esquemática. Toda a interface utiliza **Português de Portugal**.
 
@@ -98,7 +98,7 @@ npm run build
 
 O workflow incluído usa Node 24, Java 21 e Capacitor 7, gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-Artefacto esperado: `RJP-Structures-V1.7.0-debug-apk`.
+Artefacto esperado: `RJP-Structures-V1.7.1-debug-apk`.
 
 ## Ficheiros principais
 
@@ -110,3 +110,16 @@ Artefacto esperado: `RJP-Structures-V1.7.0-debug-apk`.
 - `CHANGELOG_V1_7.md` — alterações desta versão;
 - `VALIDATION_V1_7.md` — validação desta versão;
 - `EC2_COVERAGE.md` — matriz de cobertura normativa.
+
+
+## WebApp / PWA
+
+A V1.7.1 pode ser distribuída simultaneamente como APK Android e WebApp instalável. A WebApp inclui `manifest.webmanifest`, service worker para utilização offline após a primeira visita e workflow `.github/workflows/webapp.yml` para publicação automática no GitHub Pages.
+
+### Publicar no GitHub Pages
+1. Enviar esta versão para o repositório.
+2. Abrir **Settings → Pages** no GitHub e escolher **GitHub Actions** como origem.
+3. Executar o workflow **WebApp GitHub Pages** (ou fazer push para `main`/`master`).
+4. No fim do workflow, o endereço da WebApp aparece no deployment `github-pages`.
+
+A aplicação guarda projetos e preferências no armazenamento local do navegador. Continua disponível a exportação/importação JSON para cópias de segurança e transferência entre dispositivos.
