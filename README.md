@@ -1,8 +1,8 @@
-# RJP Structures V1.7.3
+# RJP Structures V1.7.4
 
 Aplicação WebApp/PWA + Android (React + Vite + Capacitor) para **Vigas, Pórticos 2D e Treliças 2D**, com motor MEF, Betão Armado/EC2, pormenorização esquemática e interface em **Português de Portugal**.
 
-## Novidades V1.7.3 — cargas avançadas em barras
+## Base mantida — cargas avançadas em barras
 
 A ferramenta **Carga** foi ampliada. Ao tocar numa barra de pórtico/viga é agora possível criar, editar e apagar individualmente:
 
@@ -49,7 +49,7 @@ Mantém:
 - contraste reforçado e áreas de toque maiores;
 - gravação automática, recuperação e JSON de projeto.
 
-Os ficheiros JSON V1.7.3 guardam também a geometria livre e as rótulas.
+Os ficheiros JSON V1.7.4 guardam também a geometria livre e as rótulas.
 
 ## Motor estrutural
 
@@ -72,11 +72,11 @@ npm run build
 
 O workflow Android usa Node 24 + Java 21 e publica o artefacto:
 
-`RJP-Structures-V1.7.3-debug-apk`
+`RJP-Structures-V1.7.4-debug-apk`
 
 O workflow WebApp publica no GitHub Pages e gera:
 
-`RJP-Structures-V1.7.3-WebApp`
+`RJP-Structures-V1.7.4-WebApp`
 
 ## WebApp / PWA
 
@@ -93,3 +93,7 @@ A mesma base pode ser instalada como PWA em computador, tablet ou telemóvel e c
 - `CHANGELOG_V1_7_3.md` — alterações desta versão;
 - `VALIDATION_V1_7_3.md` — ensaios das cargas avançadas;
 - os changelogs/validações das versões anteriores são mantidos como histórico.
+
+
+## V1.7.4 — Inserção guiada de cargas
+Ao tocar no ícone **Carga**, a aplicação abre automaticamente o separador **Cargas**. O utilizador escolhe se a carga é aplicada num **nó** ou numa **barra**, seleciona a tipologia, localização e valor. Estão disponíveis Fx, Fy e Mz nos nós; nas barras, forças concentradas axial/transversal, momento concentrado e cargas distribuídas retangulares, triangulares e trapezoidais, totais ou parciais. Também é possível tocar diretamente num nó ou numa barra para preencher o local de aplicação.
