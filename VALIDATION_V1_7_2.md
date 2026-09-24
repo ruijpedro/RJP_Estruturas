@@ -1,28 +1,26 @@
 # Validação V1.7.2
 
-## Verificação do solver de rótulas
+## Novo modelo
+Foram revistos os seis modos de arranque disponíveis no assistente **Novo modelo**:
 
-Foi compilado `src/structural.ts` isoladamente com TypeScript em modo `strict` e testada uma barra de 6,00 m, q = 10 kN/m.
+- Modelo padrão
+- Em branco
+- Apoios
+- Barra sem nós visíveis
+- Barra com nós
+- Nós
 
-### Encastrada nas duas extremidades
-- reações verticais: 30 + 30 kN;
-- momentos de extremidade em módulo: 30 kNm;
-- momento a meio vão: 15 kNm.
+## Regras internas
+- Uma barra continua a ser representada internamente por dois nós, como exige o MEF.
+- Na opção **Barra sem nós visíveis**, os nós são apenas ocultados no desenho.
+- A ferramenta **Nós** da barra de visualização permite mostrar/ocultar os nós a qualquer momento.
+- A ferramenta **Apoio** cria um nó de apoio quando é usada numa zona vazia.
+- A ferramenta **Barra** cria automaticamente os nós extremos quando não existem nós próximos.
+- A ferramenta **Nó** cria nós independentes na grelha.
+- Coordenadas criadas graficamente usam snap de 0,25 m.
 
-### Rótula nas duas extremidades
-- reações verticais: 30 + 30 kN;
-- momentos nas rótulas: aproximadamente 0 kNm;
-- momento máximo no vão: 45 kNm.
-
-### Rótula inicial + extremo final rígido
-- reações verticais: 22,5 + 37,5 kN;
-- momento no extremo libertado: 0 kNm;
-- momento no extremo rígido: 45 kNm em módulo.
-
-Os valores coincidem com as soluções analíticas clássicas para estes casos.
+## Persistência
+Modelos livres, visibilidade dos nós e opções de projeto são incluídos no autosave e na exportação JSON.
 
 ## Verificação TypeScript
-
-`App.tsx`, `structural.ts` e `ec2.ts` foram verificados com TypeScript `strict` usando declarações temporárias apenas para substituir os pacotes React indisponíveis no ambiente de validação. Não foram detetados erros de tipos no código da versão.
-
-A instalação completa de dependências npm não foi concluída no ambiente de preparação por timeout de acesso ao registry; o build completo deve ser confirmado pelo GitHub Actions incluído no projeto.
+Foi efetuada verificação sintática/tipológica dos módulos principais com TypeScript. No ambiente local de geração não estavam disponíveis as dependências React do projeto, pelo que foram usadas declarações de interface temporárias apenas para validar a estrutura TypeScript/JSX; não foram detetados erros adicionais no código introduzido.
