@@ -31,7 +31,7 @@ jobs:
       - name: Guardar distribuição WebApp
         uses: actions/upload-artifact@v6
         with:
-          name: RJP-Structures-V1.7.4-WebApp
+          name: RJP-Structures-V1.7.5-WebApp
           path: ./dist
           if-no-files-found: error
       - name: Configurar GitHub Pages
