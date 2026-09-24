@@ -2,12 +2,34 @@ export type Node2D = {
   /** Coordenadas geométricas em metros. */
   id: number; x: number; y: number;
   fixX?: boolean; fixY?: boolean; fixR?: boolean;
-  /** Cargas nodais: fx/fy em kN; mz em kNm. */
+  /** Cargas nodais globais: fx/fy em kN; mz em kNm. */
   fx?: number; fy?: number; mz?: number;
 }
 
 export type RCSection = { b:number; h:number; cover:number; fck:number; fyk:number }
 export type ElementKind = 'frame'|'truss'
+export type MemberLoadType='uniform'|'triangular'|'trapezoidal'|'point'|'moment'
+export type MemberLoadAxis='localY'|'localX'
+
+/**
+ * Ação aplicada diretamente numa barra.
+ * - x/x1/x2 em metros medidos desde n1;
+ * - P em kN; M em kNm; q1/q2 em kN/m;
+ * - sinais seguem os eixos locais do elemento.
+ */
+export type MemberLoad={
+  id:string;
+  type:MemberLoadType;
+  axis?:MemberLoadAxis;
+  x?:number;
+  x1?:number;
+  x2?:number;
+  P?:number;
+  M?:number;
+  q1?:number;
+  q2?:number;
+  label?:string;
+}
 
 export type Element2D = {
   id: number; n1: number; n2: number;
@@ -15,8 +37,10 @@ export type Element2D = {
   E: number; A: number; I: number;
   /** Comportamento: pórtico 2D (default) ou barra de treliça axial. */
   kind?: ElementKind;
-  /** Carga distribuída local em kN/m. Apenas para elementos frame. */
+  /** Compatibilidade com projetos antigos: carga distribuída uniforme local Y em kN/m. */
   qy?: number;
+  /** V1.7.5: várias ações independentes na mesma barra. */
+  loads?: MemberLoad[];
   section?: RCSection;
 }
 
@@ -40,6 +64,7 @@ type Mat = number[][]
 const zeros=(r:number,c:number):Mat=>Array.from({length:r},()=>Array(c).fill(0))
 const mm=(a:Mat,b:Mat):Mat=>a.map((row)=>b[0].map((_,j)=>row.reduce((s,v,k)=>s+v*b[k][j],0)))
 const mt=(a:Mat):Mat=>a[0].map((_,i)=>a.map(r=>r[i]))
+const clamp=(v:number,a:number,b:number)=>Math.max(a,Math.min(b,v))
 
 function inv(a:Mat):Mat {
   const n=a.length, m=a.map((r,i)=>[...r,...Array.from({length:n},(_,j)=>i===j?1:0)])
@@ -88,30 +113,131 @@ function T(c:number,s:number):Mat { return [
   [0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]
 ]}
 
-function memberSamples(Lmm:number,qNmm:number,end:number[],kind:ElementKind,count=81):MemberSample[]{
+const GL8_X=[-0.9602898564975363,-0.7966664774136267,-0.5255324099163290,-0.1834346424956498,0.1834346424956498,0.5255324099163290,0.7966664774136267,0.9602898564975363]
+const GL8_W=[0.1012285362903763,0.2223810344533745,0.3137066458778873,0.3626837833783620,0.3626837833783620,0.3137066458778873,0.2223810344533745,0.1012285362903763]
+
+function shapeBending(x:number,L:number){
+  const r=clamp(x/Math.max(L,1e-12),0,1),r2=r*r,r3=r2*r
+  return {
+    N1:1-3*r2+2*r3,
+    N2:L*(r-2*r2+r3),
+    N3:3*r2-2*r3,
+    N4:L*(-r2+r3),
+    dN1:(-6*r+6*r2)/L,
+    dN2:1-4*r+3*r2,
+    dN3:(6*r-6*r2)/L,
+    dN4:-2*r+3*r2
+  }
+}
+
+function elementLoads(e:Element2D,Lm:number):MemberLoad[]{
+  const loads=(e.loads??[]).map(x=>({...x}))
+  if(e.qy!==undefined&&Math.abs(e.qy)>1e-12&&!loads.some(l=>l.id==='legacy-qy')){
+    loads.unshift({id:'legacy-qy',type:'uniform',axis:'localY',x1:0,x2:Lm,q1:e.qy,q2:e.qy,label:'q'})
+  }
+  return loads
+}
+
+function normalizeLoad(load:MemberLoad,Lm:number):MemberLoad{
+  const x=clamp(load.x??Lm/2,0,Lm)
+  let x1=clamp(load.x1??0,0,Lm),x2=clamp(load.x2??Lm,0,Lm)
+  if(x2<x1)[x1,x2]=[x2,x1]
+  if(Math.abs(x2-x1)<1e-9)x2=Math.min(Lm,x1+1e-6)
+  if(load.type==='uniform')return {...load,axis:'localY',x1,x2,q2:load.q1??load.q2??0,q1:load.q1??load.q2??0}
+  if(load.type==='triangular')return {...load,axis:'localY',x1,x2,q1:load.q1??0,q2:load.q2??0}
+  if(load.type==='trapezoidal')return {...load,axis:'localY',x1,x2,q1:load.q1??0,q2:load.q2??0}
+  if(load.type==='point')return {...load,axis:load.axis??'localY',x,P:load.P??0}
+  return {...load,axis:'localY',x,M:load.M??0}
+}
+
+function integrate(a:number,b:number,f:(x:number)=>number){
+  if(b<=a)return 0
+  const c=(a+b)/2,h=(b-a)/2
+  let s=0
+  for(let i=0;i<8;i++)s+=GL8_W[i]*f(c+h*GL8_X[i])
+  return s*h
+}
+
+function distributedValue(load:MemberLoad,xm:number){
+  const a=load.x1??0,b=load.x2??0
+  if(xm<a-1e-12||xm>b+1e-12||b<=a)return 0
+  const t=(xm-a)/(b-a),q1=load.q1??0,q2=load.q2??q1
+  return q1+(q2-q1)*t
+}
+
+function equivalentLoadVector(e:Element2D,Lmm:number,kind:ElementKind):number[]{
+  const fl=Array<number>(6).fill(0),Lm=Lmm/1000
   if(kind==='truss'){
-    const N0=-end[0], NL=end[3]
+    for(const raw of elementLoads(e,Lm)){
+      const load=normalizeLoad(raw,Lm)
+      if(load.type==='point'&&load.axis==='localX'){
+        const x=(load.x??0)*1000,r=x/Lmm,P=(load.P??0)*1000
+        fl[0]+=P*(1-r);fl[3]+=P*r
+      }
+    }
+    return fl
+  }
+  for(const raw of elementLoads(e,Lm)){
+    const load=normalizeLoad(raw,Lm)
+    if(load.type==='uniform'||load.type==='triangular'||load.type==='trapezoidal'){
+      const a=(load.x1??0)*1000,b=(load.x2??Lm)*1000
+      for(let k=0;k<8;k++){
+        const x=(a+b)/2+(b-a)/2*GL8_X[k],xm=x/1000,q=distributedValue(load,xm) // kN/m == N/mm
+        const sh=shapeBending(x,Lmm),w=GL8_W[k]*(b-a)/2
+        fl[1]+=sh.N1*q*w;fl[2]+=sh.N2*q*w;fl[4]+=sh.N3*q*w;fl[5]+=sh.N4*q*w
+      }
+    }else if(load.type==='point'){
+      const x=(load.x??Lm/2)*1000,P=(load.P??0)*1000,r=x/Lmm
+      if(load.axis==='localX'){fl[0]+=P*(1-r);fl[3]+=P*r}
+      else{const sh=shapeBending(x,Lmm);fl[1]+=sh.N1*P;fl[2]+=sh.N2*P;fl[4]+=sh.N3*P;fl[5]+=sh.N4*P}
+    }else if(load.type==='moment'){
+      const x=(load.x??Lm/2)*1000,M=(load.M??0)*1e6,sh=shapeBending(x,Lmm)
+      fl[1]+=sh.dN1*M;fl[2]+=sh.dN2*M;fl[4]+=sh.dN3*M;fl[5]+=sh.dN4*M
+    }
+  }
+  return fl
+}
+
+function cumulativeDistributed(load:MemberLoad,xm:number,withLever=false){
+  const a=load.x1??0,b=Math.min(load.x2??0,xm)
+  if(b<=a)return 0
+  return integrate(a,b,s=>{
+    const q=distributedValue(load,s)*1000 // kN/m -> N/m
+    return withLever?q*(xm-s):q
+  })
+}
+
+function memberSamples(Lm:number,end:number[],kind:ElementKind,loads:MemberLoad[],count=121):MemberSample[]{
+  if(kind==='truss'){
+    const N0=-end[0]
     return Array.from({length:count},(_,i)=>{
-      const xmm=Lmm*i/(count-1)
-      const t=xmm/Math.max(Lmm,1e-12)
-      return {x:xmm/1000,N:N0+(NL-N0)*t,V:0,M:0}
+      const x=Lm*i/(count-1)
+      let N=N0
+      for(const raw of loads){const l=normalizeLoad(raw,Lm);if(l.type==='point'&&l.axis==='localX'&&(l.x??0)<=x+1e-10)N-=(l.P??0)*1000}
+      return {x,N,V:0,M:0}
     })
   }
-  const M0=-end[2], ML=end[5]
-  const c1=(ML-M0+qNmm*Lmm*Lmm/2)/Math.max(Lmm,1e-12)
-  const N0=-end[0], NL=end[3]
+  const N0=-end[0],V0=-end[1],M0=-end[2]
   return Array.from({length:count},(_,i)=>{
-    const xmm=Lmm*i/(count-1)
-    const M=M0+c1*xmm-qNmm*xmm*xmm/2
-    const V=c1-qNmm*xmm
-    const N=N0+(NL-N0)*(xmm/Math.max(Lmm,1e-12))
-    return {x:xmm/1000,N,V,M}
+    const x=Lm*i/(count-1)
+    let N=N0,V=V0,M=M0+V0*x*1000
+    for(const raw of loads){
+      const l=normalizeLoad(raw,Lm)
+      if(l.type==='uniform'||l.type==='triangular'||l.type==='trapezoidal'){
+        const cq=cumulativeDistributed(l,x,false),cm=cumulativeDistributed(l,x,true)
+        V-=cq;M-=cm*1000
+      }else if(l.type==='point'&&(l.x??0)<=x+1e-10){
+        if(l.axis==='localX')N-=(l.P??0)*1000
+        else{V-=(l.P??0)*1000;M-=(l.P??0)*1000*(x-(l.x??0))*1000}
+      }else if(l.type==='moment'&&(l.x??0)<=x+1e-10){M+=(l.M??0)*1e6}
+    }
+    return {x,N,V,M}
   })
 }
 
 /**
  * Pórtico/treliça plana 2D por MEF.
- * Entrada: coordenadas [m], cargas nodais [kN/kNm], q [kN/m].
+ * Entrada: coordenadas [m], cargas nodais [kN/kNm], ações de barra [kN, kNm, kN/m].
  * Internamente: N-mm, coerente com E [MPa], A [mm²] e I [mm⁴].
  */
 export function solveFrame(model:Model2D):FrameResult{
@@ -127,13 +253,9 @@ export function solveFrame(model:Model2D):FrameResult{
   })
 
   const frameConnected=new Set<number>()
-  for(const e of model.elements){
-    if((e.kind??'frame')==='frame'){
-      frameConnected.add(e.n1); frameConnected.add(e.n2)
-    }
-  }
+  for(const e of model.elements){if((e.kind??'frame')==='frame'){frameConnected.add(e.n1);frameConnected.add(e.n2)}}
 
-  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;dofs:number[];fl:number[];q:number}[]=[]
+  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;dofs:number[];fl:number[];loads:MemberLoad[]}[]=[]
   for(const e of model.elements){
     const i=nodeIndex.get(e.n1), j=nodeIndex.get(e.n2)
     if(i===undefined||j===undefined) throw new Error(`Elemento E${e.id}: nó inexistente.`)
@@ -146,16 +268,16 @@ export function solveFrame(model:Model2D):FrameResult{
     const dofs=[3*i,3*i+1,3*i+2,3*j,3*j+1,3*j+2]
     dofs.forEach((r,rr)=>dofs.forEach((cc,cc2)=>K[r][cc]+=kg[rr][cc2]))
 
-    const q=kind==='frame'?(e.qy??0):0 // kN/m == N/mm numericamente
-    const fl=kind==='frame'?[0,q*Lmm/2,q*Lmm*Lmm/12,0,q*Lmm/2,-q*Lmm*Lmm/12]:[0,0,0,0,0,0]
+    const loads=elementLoads(e,Lm).map(l=>normalizeLoad(l,Lm))
+    if(kind==='truss'&&loads.some(l=>l.type!=='point'||l.axis!=='localX')) throw new Error(`Elemento E${e.id}: em treliças, as ações de barra devem ser axiais. Use cargas nodais para ações transversais.`)
+    const fl=equivalentLoadVector(e,Lmm,kind)
     const fg=mm(mt(tr),fl.map(v=>[v])).map(r=>r[0])
     dofs.forEach((dof,k)=>F[dof]+=fg[k])
-    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,dofs,fl,q})
+    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,dofs,fl,loads})
   }
 
   const fixed:boolean[]=[]
   model.nodes.forEach(n=>{
-    // Em nós exclusivamente de treliça a rotação não tem rigidez física: elimina-se o DOF rotacional.
     const autoFixR=!frameConnected.has(n.id)
     fixed.push(!!n.fixX,!!n.fixY,!!n.fixR||autoFixR)
   })
@@ -170,14 +292,7 @@ export function solveFrame(model:Model2D):FrameResult{
   const members:MemberResult[]=cache.map(ca=>{
     const ug=ca.dofs.map(d=>U[d]), ul=mm(ca.tr,ug.map(v=>[v])).map(r=>r[0])
     const fint=mm(ca.kl,ul.map(v=>[v])).map(r=>r[0]).map((v,k)=>v-ca.fl[k])
-    return {
-      id:ca.e.id,
-      kind:ca.kind,
-      L:ca.Lm,
-      localDisplacements:ul,
-      endForces:fint,
-      samples:memberSamples(ca.Lmm,ca.q,fint,ca.kind)
-    }
+    return {id:ca.e.id,kind:ca.kind,L:ca.Lm,localDisplacements:ul,endForces:fint,samples:memberSamples(ca.Lm,fint,ca.kind,ca.loads)}
   })
   return {U,R,members}
 }
