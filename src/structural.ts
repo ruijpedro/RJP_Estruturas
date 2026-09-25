@@ -41,6 +41,9 @@ export type Element2D = {
   qy?: number;
   /** V1.7.5: várias ações independentes na mesma barra. */
   loads?: MemberLoad[];
+  /** Libertações rotacionais opcionais. Ausente/false = ligação rígida. */
+  releaseStartR?: boolean;
+  releaseEndR?: boolean;
   section?: RCSection;
 }
 
@@ -207,6 +210,40 @@ function cumulativeDistributed(load:MemberLoad,xm:number,withLever=false){
   })
 }
 
+
+function condenseFrameEndReleases(kl:Mat,fl:number[],releaseStart:boolean,releaseEnd:boolean){
+  const released:number[]=[]
+  if(releaseStart)released.push(2)
+  if(releaseEnd)released.push(5)
+  if(!released.length)return {klCond:kl.map(r=>[...r]),flCond:[...fl],released,retained:[0,1,2,3,4,5]}
+  const retained=[0,1,2,3,4,5].filter(i=>!released.includes(i))
+  const Krr=retained.map(i=>retained.map(j=>kl[i][j]))
+  const Krq=retained.map(i=>released.map(j=>kl[i][j]))
+  const Kqr=released.map(i=>retained.map(j=>kl[i][j]))
+  const Kqq=released.map(i=>released.map(j=>kl[i][j]))
+  const invQ=inv(Kqq)
+  const correction=mm(Krq,mm(invQ,Kqr))
+  const klCond=zeros(6,6)
+  retained.forEach((ri,r)=>retained.forEach((cj,c)=>{klCond[ri][cj]=Krr[r][c]-correction[r][c]}))
+  const fq=released.map(i=>[fl[i]])
+  const adjust=mm(Krq,mm(invQ,fq)).map(r=>r[0])
+  const flCond=Array<number>(6).fill(0)
+  retained.forEach((ri,r)=>{flCond[ri]=fl[ri]-adjust[r]})
+  return {klCond,flCond,released,retained}
+}
+
+function recoverReleasedLocalDisplacements(kl:Mat,fl:number[],ulNode:number[],released:number[],retained:number[]){
+  if(!released.length)return [...ulNode]
+  const Kqr=released.map(i=>retained.map(j=>kl[i][j]))
+  const Kqq=released.map(i=>released.map(j=>kl[i][j]))
+  const ur=retained.map(i=>[ulNode[i]])
+  const rhs=released.map((i,r)=>[fl[i]-mm(Kqr,ur)[r][0]])
+  const uq=mm(inv(Kqq),rhs).map(r=>r[0])
+  const out=[...ulNode]
+  released.forEach((i,k)=>out[i]=uq[k])
+  return out
+}
+
 function memberSamples(Lm:number,end:number[],kind:ElementKind,loads:MemberLoad[],count=121):MemberSample[]{
   if(kind==='truss'){
     const N0=-end[0]
@@ -253,9 +290,14 @@ export function solveFrame(model:Model2D):FrameResult{
   })
 
   const frameConnected=new Set<number>()
-  for(const e of model.elements){if((e.kind??'frame')==='frame'){frameConnected.add(e.n1);frameConnected.add(e.n2)}}
+  for(const e of model.elements){
+    if((e.kind??'frame')==='frame'){
+      if(!e.releaseStartR)frameConnected.add(e.n1)
+      if(!e.releaseEndR)frameConnected.add(e.n2)
+    }
+  }
 
-  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;dofs:number[];fl:number[];loads:MemberLoad[]}[]=[]
+  const cache:{e:Element2D;kind:ElementKind;i:number;j:number;Lmm:number;Lm:number;tr:Mat;kl:Mat;klCond:Mat;dofs:number[];fl:number[];flCond:number[];released:number[];retained:number[];loads:MemberLoad[]}[]= []
   for(const e of model.elements){
     const i=nodeIndex.get(e.n1), j=nodeIndex.get(e.n2)
     if(i===undefined||j===undefined) throw new Error(`Elemento E${e.id}: nó inexistente.`)
@@ -264,16 +306,17 @@ export function solveFrame(model:Model2D):FrameResult{
     if(Lmm<=1e-6) throw new Error(`Elemento E${e.id}: comprimento nulo.`)
     const Lm=Lmm/1000,c=dx/Lmm,s=dy/Lmm,kind=e.kind??'frame'
     const kl=kind==='truss'?localKTruss(e.E,e.A,Lmm):localKFrame(e.E,e.A,e.I,Lmm)
-    const tr=T(c,s), kg=mm(mt(tr),mm(kl,tr))
-    const dofs=[3*i,3*i+1,3*i+2,3*j,3*j+1,3*j+2]
-    dofs.forEach((r,rr)=>dofs.forEach((cc,cc2)=>K[r][cc]+=kg[rr][cc2]))
-
     const loads=elementLoads(e,Lm).map(l=>normalizeLoad(l,Lm))
     if(kind==='truss'&&loads.some(l=>l.type!=='point'||l.axis!=='localX')) throw new Error(`Elemento E${e.id}: em treliças, as ações de barra devem ser axiais. Use cargas nodais para ações transversais.`)
     const fl=equivalentLoadVector(e,Lmm,kind)
-    const fg=mm(mt(tr),fl.map(v=>[v])).map(r=>r[0])
+    const releaseData=kind==='frame'?condenseFrameEndReleases(kl,fl,!!e.releaseStartR,!!e.releaseEndR):{klCond:kl.map(r=>[...r]),flCond:[...fl],released:[],retained:[0,1,2,3,4,5]}
+    const klCond=releaseData.klCond,flCond=releaseData.flCond
+    const tr=T(c,s), kg=mm(mt(tr),mm(klCond,tr))
+    const dofs=[3*i,3*i+1,3*i+2,3*j,3*j+1,3*j+2]
+    dofs.forEach((r,rr)=>dofs.forEach((cc,cc2)=>K[r][cc]+=kg[rr][cc2]))
+    const fg=mm(mt(tr),flCond.map(v=>[v])).map(r=>r[0])
     dofs.forEach((dof,k)=>F[dof]+=fg[k])
-    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,dofs,fl,loads})
+    cache.push({e,kind,i,j,Lmm,Lm,tr,kl,klCond,dofs,fl,flCond,released:releaseData.released,retained:releaseData.retained,loads})
   }
 
   const fixed:boolean[]=[]
@@ -283,15 +326,20 @@ export function solveFrame(model:Model2D):FrameResult{
   })
 
   const free=fixed.map((f,i)=>!f?i:-1).filter(i=>i>=0)
-  if(!free.length) throw new Error('Não existem graus de liberdade livres.')
-  const Kff=free.map(i=>free.map(j=>K[i][j])), Ff=free.map(i=>F[i])
-  const uf=mm(inv(Kff),Ff.map(v=>[v])).map(r=>r[0]), U=Array<number>(nd).fill(0)
-  free.forEach((d,k)=>U[d]=uf[k])
+  const U=Array<number>(nd).fill(0)
+  if(free.length){
+    const Kff=free.map(i=>free.map(j=>K[i][j])), Ff=free.map(i=>F[i])
+    const uf=mm(inv(Kff),Ff.map(v=>[v])).map(r=>r[0])
+    free.forEach((d,k)=>U[d]=uf[k])
+  }
   const R=K.map((row,i)=>row.reduce((sum,v,j)=>sum+v*U[j],0)-F[i])
 
   const members:MemberResult[]=cache.map(ca=>{
-    const ug=ca.dofs.map(d=>U[d]), ul=mm(ca.tr,ug.map(v=>[v])).map(r=>r[0])
+    const ug=ca.dofs.map(d=>U[d]), ulNode=mm(ca.tr,ug.map(v=>[v])).map(r=>r[0])
+    const ul=ca.kind==='frame'?recoverReleasedLocalDisplacements(ca.kl,ca.fl,ulNode,ca.released,ca.retained):ulNode
     const fint=mm(ca.kl,ul.map(v=>[v])).map(r=>r[0]).map((v,k)=>v-ca.fl[k])
+    if(ca.e.releaseStartR)fint[2]=0
+    if(ca.e.releaseEndR)fint[5]=0
     return {id:ca.e.id,kind:ca.kind,L:ca.Lm,localDisplacements:ul,endForces:fint,samples:memberSamples(ca.Lm,fint,ca.kind,ca.loads)}
   })
   return {U,R,members}

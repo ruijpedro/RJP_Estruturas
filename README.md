@@ -1,16 +1,18 @@
-# RJP Structures V1.7.6
+# RJP Structures V1.7.7
 
-## Novidades da V1.7.6
+## Novidades da V1.7.7
 
-Esta versão corrige o ponto mais importante do editor: **desenhar e editar diretamente no modelo tem de funcionar de forma fluida em rato, toque e caneta**.
+Esta versão corrige a distinção entre **nó**, **apoio** e **rótula**.
 
-- **Barra**: toque no início e no fim; aparece uma pré-visualização azul e os nós são criados automaticamente.
-- **Apoio**: toque num ponto ou nó e escolha visualmente Livre, Móvel X/Y, Articulado ou Encastrado.
-- **Carga**: toque num nó para Fx/Fy/Mz ou numa barra para força concentrada, uniforme, triangular, trapezoidal ou momento.
-- **Mover**: arraste nós diretamente.
-- **Apagar**: elimina barras, nós, apoios, forças, momentos e ações de barra.
-- Mantém várias ações simultâneas na mesma barra, MEF 2D, EC2, Pormenorização, WebApp/PWA e APK Android.
-- O cache PWA foi atualizado para impedir que a WebApp continue a apresentar a interface antiga depois de uma atualização.
+- Uma barra de viga/pórtico é criada com **ligação rígida no início e no fim**.
+- Os nós MEF continuam a existir para o cálculo, mas são desenhados como pequenos pontos sólidos e **não representam rótulas**.
+- Uma rótula só existe quando é ativada em **Modelo → Ligações da barra**.
+- Cada extremidade pode ser configurada independentemente como **Rígida** ou **Rótula**.
+- As rótulas reais aparecem no desenho como um círculo branco marcado `R`.
+- O motor MEF trata as libertações rotacionais por condensação estática.
+- Numa viga contínua, barras que partilham um nó transmitem momento enquanto as ligações forem rígidas.
+- Projetos antigos sem informação de libertações são interpretados como ligações rígidas.
+- Mantêm-se o editor gráfico fluido, ações múltiplas, apoios editáveis, MEF 2D, EC2, Pormenorização, WebApp/PWA e APK Android.
 
 ## Motor estrutural
 
@@ -42,13 +44,13 @@ npm run build
 
 O workflow usa Node 24, Java 21 e Capacitor 7. Gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-Artefacto esperado: **`RJP-Structures-V1.7.6-debug-apk`**.
+Artefacto esperado: **`RJP-Structures-V1.7.7-debug-apk`**.
 
 ## WebApp / GitHub Pages
 
 O workflow `WebApp GitHub Pages` compila e publica a pasta `dist`. Em **Settings → Pages**, selecionar **GitHub Actions** como origem.
 
-Artefacto esperado: **`RJP-Structures-V1.7.6-WebApp`**.
+Artefacto esperado: **`RJP-Structures-V1.7.7-WebApp`**.
 
 ## Ficheiros principais
 
@@ -58,6 +60,6 @@ Artefacto esperado: **`RJP-Structures-V1.7.6-WebApp`**.
 - `src/styles.css` — interface gráfica e acessibilidade;
 - `.github/workflows/android.yml` — build Android;
 - `.github/workflows/webapp.yml` — build/publicação WebApp;
-- `CHANGELOG_V1_7_6.md` — alterações desta versão;
-- `VALIDATION_V1_7_6.md` — validações efetuadas;
+- `CHANGELOG_V1_7_7.md` — alterações desta versão;
+- `VALIDATION_V1_7_7.md` — validações efetuadas;
 - `EC2_COVERAGE.md` — matriz de cobertura normativa.

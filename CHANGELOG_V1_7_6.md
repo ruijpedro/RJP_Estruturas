@@ -1,7 +1,7 @@
-# RJP Structures V1.7.6 — Editor gráfico fluido
+# RJP Structures V1.7.7 — Editor gráfico fluido
 
 ## Correção principal
-A V1.7.6 substitui a interação baseada em cliques/prompts por um editor gráfico orientado a toque/pointer.
+A V1.7.7 substitui a interação baseada em cliques/prompts por um editor gráfico orientado a toque/pointer.
 
 ### Desenho de barras
 - Ferramenta **Barra**: primeiro toque define o início, segundo toque define o fim.
@@ -36,5 +36,5 @@ A V1.7.6 substitui a interação baseada em cliques/prompts por um editor gráfi
 - Área de toque das barras aumentada, importante para tablet e telemóvel.
 
 ### WebApp/PWA
-- cache atualizado para `rjp-structures-v1.7.6`, forçando a substituição da interface antiga após atualização.
+- cache atualizado para `rjp-structures-v1.7.7`, forçando a substituição da interface antiga após atualização.
 - mantém publicação GitHub Pages e APK Android no mesmo repositório.
