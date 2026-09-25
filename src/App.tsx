@@ -33,6 +33,10 @@ type ModelEdits={
 }
 type EditsByMode=Record<Mode,ModelEdits>
 type UiSettings={fontScale:number;canvasTextScale:number;highContrast:boolean;largeTargets:boolean}
+type BarDraft={x:number;y:number;nodeId?:number}|null
+type EditorDialog={kind:'support';nodeId:number}|{kind:'nodal';nodeId:number}|{kind:'member';elementId:number;loadId?:string}|null
+type NodalForm={fx:number;fy:number;mz:number}
+type MemberForm={type:MemberLoadType;axis:'localY'|'localX';P:number;M:number;x:number;x1:number;x2:number;q1:number;q2:number}
 type ProjectFile={version:string;mode:Mode;settings:Settings;projectName?:string;edits?:EditsByMode;ui?:UiSettings;customModels?:Partial<Record<Mode,Model2D>>;showNodes?:boolean;savedAt?:string}
 
 type RebarRow={mark:string;description:string;phi:number;qty:number;lengthM:number;weightKg:number}
@@ -204,11 +208,16 @@ function displayLoads(e:any,L:number):MemberLoad[]{
   return arr
 }
 
-function ModelView({model,result,selected,setSelected,diagram,zoom,setZoom,showGrid,showLabels,showLoads,showNodes,tool,barStartNodeId,onCanvasPoint,onDeleteSupport,onDeleteNodalLoad,onDeleteMemberLoad,onCycleSupport,onEditNodalLoad,onAddMemberLoad,onEditMemberLoad}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,diagram:CanvasResult,zoom:number,setZoom:(z:number)=>void,showGrid:boolean,showLabels:boolean,showLoads:boolean,showNodes:boolean,tool:Tool,barStartNodeId:number|null,onCanvasPoint:(x:number,y:number)=>void,onDeleteSupport:(nodeId:number)=>void,onDeleteNodalLoad:(nodeId:number,component:LoadComponent)=>void,onDeleteMemberLoad:(elementId:number,loadId:string)=>void,onCycleSupport:(nodeId:number)=>void,onEditNodalLoad:(nodeId:number)=>void,onAddMemberLoad:(elementId:number)=>void,onEditMemberLoad:(elementId:number,loadId:string)=>void}){
+function ModelView({model,result,selected,setSelected,diagram,zoom,setZoom,showGrid,showLabels,showLoads,showNodes,tool,barDraft,onCanvasPoint,onDeleteSupport,onDeleteNodalLoad,onDeleteMemberLoad,onOpenSupport,onOpenNodalLoad,onOpenMemberLoad,onDeleteElement,onDeleteNode,onMoveNode}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,diagram:CanvasResult,zoom:number,setZoom:(z:number)=>void,showGrid:boolean,showLabels:boolean,showLoads:boolean,showNodes:boolean,tool:Tool,barDraft:BarDraft,onCanvasPoint:(x:number,y:number)=>void,onDeleteSupport:(nodeId:number)=>void,onDeleteNodalLoad:(nodeId:number,component:LoadComponent)=>void,onDeleteMemberLoad:(elementId:number,loadId:string)=>void,onOpenSupport:(nodeId:number)=>void,onOpenNodalLoad:(nodeId:number)=>void,onOpenMemberLoad:(elementId:number,loadId?:string)=>void,onDeleteElement:(elementId:number)=>void,onDeleteNode:(nodeId:number)=>void,onMoveNode:(nodeId:number,x:number,y:number)=>void}){
+  const [hoverWorld,setHoverWorld]=useState<{x:number;y:number}|null>(null)
+  const [dragNodeId,setDragNodeId]=useState<number|null>(null)
   const xs=model.nodes.map(n=>n.x),ys=model.nodes.map(n=>n.y)
-  const minX=xs.length?Math.min(...xs):0,maxX=xs.length?Math.max(...xs):10,minY=ys.length?Math.min(...ys):0,maxY=ys.length?Math.max(...ys):6
-  const spanX=Math.max(4,maxX-minX),spanY=Math.max(4,maxY-minY),W=940,H=520,p=78,sx=(W-2*p)/spanX,sy=(H-2*p)/spanY,sc=Math.min(sx,sy)
-  const P=(n:Node2D)=>({x:p+(n.x-minX)*sc,y:H-p-(n.y-minY)*sc})
+  const rawMinX=xs.length?Math.min(...xs):0,rawMaxX=xs.length?Math.max(...xs):10,rawMinY=ys.length?Math.min(...ys):0,rawMaxY=ys.length?Math.max(...ys):6
+  // Janela base estável: evita que o desenho salte enquanto se move um nó ou se desenha uma barra.
+  const minX=Math.min(-1,rawMinX-1),maxX=Math.max(11,rawMaxX+1),minY=Math.min(-2,rawMinY-1),maxY=Math.max(6,rawMaxY+1)
+  const spanX=maxX-minX,spanY=maxY-minY
+  const W=940,H=520,p=62,sx=(W-2*p)/spanX,sy=(H-2*p)/spanY,sc=Math.min(sx,sy)
+  const P=(n:{x:number;y:number})=>({x:p+(n.x-minX)*sc,y:H-p-(n.y-minY)*sc})
   const nodeMap=new Map(model.nodes.map((n,i)=>[n.id,{n,i}]))
   const maxTrans=result?Math.max(0.001,...model.nodes.flatMap((_,i)=>[Math.abs(result.U[3*i]??0),Math.abs(result.U[3*i+1]??0)])):1
   const deformScale=result?Math.min(80,48/maxTrans):1
@@ -220,33 +229,37 @@ function ModelView({model,result,selected,setSelected,diagram,zoom,setZoom,showG
     if(na&&nb){const a=P(na),b=P(nb),dx=b.x-a.x,dy=b.y-a.y,Lpx=Math.hypot(dx,dy)||1,nx=-dy/Lpx,ny=dx/Lpx,vals=selectedResult.samples.map(sm=>sm[diagram]);diagramMax=Math.max(1,...vals.map(v=>Math.abs(v)));diagramPoints=selectedResult.samples.map(sm=>{const t=selectedResult.L>0?sm.x/selectedResult.L:0,baseX=a.x+dx*t,baseY=a.y+dy*t,off=(sm[diagram]/diagramMax)*72;return `${baseX+nx*off},${baseY+ny*off}`}).join(' ')}
   }
   const selectedUnit=diagram==='M'?'kNm':'kN',selectedFactor=diagram==='M'?1e6:1000,safeZoom=clamp(zoom,.7,2),vbW=W/safeZoom,vbH=H/safeZoom,vbX=(W-vbW)/2,vbY=(H-vbH)/2
-  const canvasClick=(e:any)=>{if(!['Nó','Barra','Apoio'].includes(tool))return;const svg=e.currentTarget as SVGSVGElement,rect=svg.getBoundingClientRect(),ux=vbX+(e.clientX-rect.left)/Math.max(1,rect.width)*vbW,uy=vbY+(e.clientY-rect.top)/Math.max(1,rect.height)*vbH,wx=Math.round((minX+(ux-p)/sc)*4)/4,wy=Math.round((minY+(H-p-uy)/sc)*4)/4;onCanvasPoint(wx,wy)}
+  const pointFromEvent=(e:any)=>{const svg=e.currentTarget.closest?.('svg') as SVGSVGElement||e.currentTarget as SVGSVGElement,rect=svg.getBoundingClientRect(),ux=vbX+(e.clientX-rect.left)/Math.max(1,rect.width)*vbW,uy=vbY+(e.clientY-rect.top)/Math.max(1,rect.height)*vbH;return {x:Math.round((minX+(ux-p)/sc)*4)/4,y:Math.round((minY+(H-p-uy)/sc)*4)/4}}
+  const canvasPointerDown=(e:any)=>{if(!['Nó','Barra','Apoio'].includes(tool))return;const pt=pointFromEvent(e);onCanvasPoint(pt.x,pt.y)}
+  const canvasPointerMove=(e:any)=>{const pt=pointFromEvent(e);setHoverWorld(pt);if(dragNodeId!==null)onMoveNode(dragNodeId,pt.x,pt.y)}
   const loadGlyph=(e:any,a:{x:number;y:number},b:{x:number;y:number},L:number,l:MemberLoad,idx:number)=>{
     const dx=b.x-a.x,dy=b.y-a.y,Lpx=Math.hypot(dx,dy)||1,tx=dx/Lpx,ty=dy/Lpx,nx=-ty,ny=tx
     const pos=(xm:number)=>({x:a.x+dx*clamp(xm/Math.max(L,1e-9),0,1),y:a.y+dy*clamp(xm/Math.max(L,1e-9),0,1)})
-    const click=(ev:any)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteMemberLoad(e.id,l.id);else onEditMemberLoad(e.id,l.id)}
+    const press=(ev:any)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteMemberLoad(e.id,l.id);else if(tool==='Carga'||tool==='Selecionar')onOpenMemberLoad(e.id,l.id)}
     const cls=`memberLoadGlyph ${tool==='Apagar'?'deleteTarget':'editTarget'}`
     if(l.type==='point'){
       const c=pos(l.x??L/2),sgn=(l.P??0)>=0?1:-1
-      if(l.axis==='localX'){const x1=c.x-tx*sgn*62,y1=c.y-ty*sgn*62;return <g key={l.id} className={cls} onClick={click}><line x1={x1} y1={y1} x2={c.x-tx*10*sgn} y2={c.y-ty*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={c.x+nx*18} y={c.y+ny*18} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>}
-      const x1=c.x+nx*sgn*66,y1=c.y+ny*sgn*66;return <g key={l.id} className={cls} onClick={click}><line x1={x1} y1={y1} x2={c.x+nx*10*sgn} y2={c.y+ny*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={x1+12} y={y1-8} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>
+      if(l.axis==='localX'){const x1=c.x-tx*sgn*62,y1=c.y-ty*sgn*62;return <g key={l.id} className={cls} onPointerDown={press}><line x1={x1} y1={y1} x2={c.x-tx*10*sgn} y2={c.y-ty*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={c.x+nx*18} y={c.y+ny*18} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>}
+      const x1=c.x+nx*sgn*66,y1=c.y+ny*sgn*66;return <g key={l.id} className={cls} onPointerDown={press}><line x1={x1} y1={y1} x2={c.x+nx*10*sgn} y2={c.y+ny*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={x1+12} y={y1-8} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>
     }
     if(l.type==='moment'){
       const c=pos(l.x??L/2),sgn=(l.M??0)>=0?1:-1
-      return <g key={l.id} className={cls} onClick={click}><path d={`M ${c.x-28} ${c.y-28} A 28 28 0 ${sgn>0?1:0} ${sgn>0?1:0} ${c.x+26} ${c.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={c.x+34} y={c.y-32} className="loadLabel">M{idx+1}={fmt(l.M)} kNm</text></g>
+      return <g key={l.id} className={cls} onPointerDown={press}><path d={`M ${c.x-28} ${c.y-28} A 28 28 0 ${sgn>0?1:0} ${sgn>0?1:0} ${c.x+26} ${c.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={c.x+34} y={c.y-32} className="loadLabel">M{idx+1}={fmt(l.M)} kNm</text></g>
     }
     const x1=l.x1??0,x2=l.x2??L,q1=l.q1??0,q2=l.q2??q1,pa=pos(x1),pb=pos(x2),offset=46
     const topA={x:pa.x+nx*offset,y:pa.y+ny*offset},topB={x:pb.x+nx*offset,y:pb.y+ny*offset}
-    return <g key={l.id} className={cls} onClick={click}><line x1={topA.x} y1={topA.y} x2={topB.x} y2={topB.y} stroke="#c91c23" strokeWidth="2"/>{Array.from({length:8}).map((_,k)=>{const t=k/7,q=q1+(q2-q1)*t,c={x:pa.x+(pb.x-pa.x)*t,y:pa.y+(pb.y-pa.y)*t},mag=Math.max(10,Math.min(46,16+Math.abs(q)*2.2)),sgn=q>=0?1:-1,start={x:c.x+nx*sgn*mag,y:c.y+ny*sgn*mag},end={x:c.x+nx*sgn*7,y:c.y+ny*sgn*7};return <line key={k} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#c91c23" strokeWidth="2" markerEnd="url(#arrowRed)"/>})}<text x={(topA.x+topB.x)/2} y={(topA.y+topB.y)/2-10} textAnchor="middle" className="loadLabel">{l.type==='uniform'?'q':l.type==='triangular'?'q△':'q▱'} {fmt(q1)}→{fmt(q2)} kN/m</text></g>
+    return <g key={l.id} className={cls} onPointerDown={press}><line x1={topA.x} y1={topA.y} x2={topB.x} y2={topB.y} stroke="#c91c23" strokeWidth="2"/>{Array.from({length:8}).map((_,k)=>{const t=k/7,q=q1+(q2-q1)*t,c={x:pa.x+(pb.x-pa.x)*t,y:pa.y+(pb.y-pa.y)*t},mag=Math.max(10,Math.min(46,16+Math.abs(q)*2.2)),sgn=q>=0?1:-1,start={x:c.x+nx*sgn*mag,y:c.y+ny*sgn*mag},end={x:c.x+nx*sgn*7,y:c.y+ny*sgn*7};return <line key={k} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#c91c23" strokeWidth="2" markerEnd="url(#arrowRed)"/>})}<text x={(topA.x+topB.x)/2} y={(topA.y+topB.y)/2-10} textAnchor="middle" className="loadLabel">{l.type==='uniform'?'q':l.type==='triangular'?'q△':'q▱'} {fmt(q1)}→{fmt(q2)} kN/m</text></g>
   }
-  return <svg className="canvas" viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`} onClick={canvasClick} onWheel={(e:any)=>{e.preventDefault();setZoom(clamp(safeZoom+(e.deltaY<0?.1:-.1),.7,2))}} aria-label="Modelo estrutural e resultados gráficos">
+  const draftA=barDraft?P(barDraft):null,draftB=barDraft&&hoverWorld?P(hoverWorld):null
+  return <svg className={`canvas tool-${tool.toLowerCase().replace('ó','o')}`} viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`} onPointerDown={canvasPointerDown} onPointerMove={canvasPointerMove} onPointerUp={()=>setDragNodeId(null)} onPointerCancel={()=>setDragNodeId(null)} onPointerLeave={()=>{setHoverWorld(null);setDragNodeId(null)}} onWheel={(e:any)=>{e.preventDefault();setZoom(clamp(safeZoom+(e.deltaY<0?.1:-.1),.7,2))}} aria-label="Editor gráfico estrutural">
     <defs><pattern id="gridSmall" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e7eaed" strokeWidth="1"/></pattern><pattern id="gridLarge" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#gridSmall)"/><path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cfd5da" strokeWidth="1.2"/></pattern><marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c91c23"/></marker></defs>
-    <rect width="100%" height="100%" fill="#fbfcfd"/>{showGrid&&<rect width="100%" height="100%" fill="url(#gridLarge)"/>}<g opacity=".75"><line x1="35" y1={H-35} x2="88" y2={H-35} stroke="#17324b" strokeWidth="2"/><line x1="35" y1={H-35} x2="35" y2={H-88} stroke="#17324b" strokeWidth="2"/><text x="92" y={H-30} className="axisLabel">X</text><text x="26" y={H-92} className="axisLabel">Y</text></g>
-    {model.elements.map(e=>{const nA=nodeMap.get(e.n1)!.n,nB=nodeMap.get(e.n2)!.n,a=P(nA),b=P(nB),le=Math.hypot(nB.x-nA.x,nB.y-nA.y),loads=displayLoads(e,le);return <g key={e.id}><g onClick={(ev)=>{ev.stopPropagation();if(tool==='Carga'){onAddMemberLoad(e.id);return}setSelected(e.id)}} className={`clickable ${tool==='Carga'?'editTarget':''}`}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={selected===e.id?'#1e63b5':'#263b4d'} strokeWidth={selected===e.id?10:7} strokeLinecap="round"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d8d8d8" strokeWidth={selected===e.id?6:4} strokeLinecap="round"/>{showLabels&&<><text x={(a.x+b.x)/2} y={(a.y+b.y)/2-13} className="memberLabel">B{e.id}</text>{selected===e.id&&<text x={(a.x+b.x)/2} y={(a.y+b.y)/2+24} className="dimLabel">{fmt(le,2)} m</text>}</>}</g>{showLoads&&loads.map((l,i)=>loadGlyph(e,a,b,le,l,i))}</g>})}
-    {result&&diagram==='Deformada'&&model.elements.map(e=>{const a=DP(nodeMap.get(e.n1)!.n),b=DP(nodeMap.get(e.n2)!.n);return <line key={`def-${e.id}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1476d4" strokeWidth="3" strokeDasharray="8 6" opacity=".95"/>})}
-    {result&&diagram!=='Deformada'&&diagramPoints&&<><polyline points={diagramPoints} fill="none" stroke="#c91c23" strokeWidth="3.5"/><text x={W-215} y="35" className="diagramLabel">{diagram}: máx. {fmt(diagramMax/selectedFactor,2)} {selectedUnit}</text></>}
-    {model.nodes.map(n=>{const pnt=P(n),hasSupport=!!(n.fixX||n.fixY||n.fixR);return <g key={n.id} className={tool==='Apoio'||tool==='Carga'?'editTarget':''} onClick={(ev)=>{if(tool==='Apoio'){ev.stopPropagation();onCycleSupport(n.id)}else if(tool==='Carga'){ev.stopPropagation();onEditNodalLoad(n.id)}}}>{showNodes?<circle cx={pnt.x} cy={pnt.y} r="8" fill="#fff" stroke="#263b4d" strokeWidth="3"/>:<circle cx={pnt.x} cy={pnt.y} r="15" fill="transparent" stroke="none"/>}{showNodes&&showLabels&&<text x={pnt.x+11} y={pnt.y-11} className="nodeLabel">N{n.id}</text>}{barStartNodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="15" fill="none" stroke="#1e63b5" strokeWidth="3" strokeDasharray="4 3"/>}{hasSupport&&<g className={`${tool==='Apagar'?'deleteTarget supportTarget':''} ${tool==='Apoio'?'editTarget':''}`} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteSupport(n.id)}}}>{n.fixR?<><rect x={pnt.x-18} y={pnt.y+5} width="36" height="18" fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-25} y1={pnt.y+25} x2={pnt.x+25} y2={pnt.y+25} stroke="#263b4d" strokeWidth="4"/></>:<><path d={`M ${pnt.x-18} ${pnt.y+20} L ${pnt.x+18} ${pnt.y+20} L ${pnt.x} ${pnt.y+5} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/>{!n.fixX&&n.fixY&&<><circle cx={pnt.x-10} cy={pnt.y+25} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><circle cx={pnt.x+10} cy={pnt.y+25} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><line x1={pnt.x-24} y1={pnt.y+31} x2={pnt.x+24} y2={pnt.y+31} stroke="#263b4d" strokeWidth="2"/></>}{n.fixX&&n.fixY&&<line x1={pnt.x-24} y1={pnt.y+22} x2={pnt.x+24} y2={pnt.y+22} stroke="#263b4d" strokeWidth="2"/>}</>}</g>}{showLoads&&(n.fy??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNodalLoad(n.id,'fy')}}}><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {fmt(n.fy)} kN</text></g>}{showLoads&&(n.fx??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNodalLoad(n.id,'fx')}}}><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x-68} y={pnt.y-10} className="loadLabel">H = {fmt(n.fx)} kN</text></g>}{showLoads&&(n.mz??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onClick={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNodalLoad(n.id,'mz')}}}><path d={`M ${pnt.x-28} ${pnt.y-28} A 28 28 0 1 1 ${pnt.x+26} ${pnt.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3"/><text x={pnt.x+30} y={pnt.y-32} className="loadLabel">M = {fmt(n.mz)} kNm</text></g>}</g>})}
-    {!model.nodes.length&&<><text x={W/2} y={H/2-12} textAnchor="middle" className="emptyCanvasTitle">Modelo vazio</text><text x={W/2} y={H/2+18} textAnchor="middle" className="emptyCanvasHint">Escolha Nó, Barra ou Apoio e toque na grelha para começar.</text></>}{result&&diagram==='Deformada'&&<text x="18" y="28" className="deformLabel">Deformada ampliada ×{fmt(deformScale,1)}</text>}
+    <rect className="canvasHit" x={vbX} y={vbY} width={vbW} height={vbH} fill="#fbfcfd"/>{showGrid&&<rect x={vbX} y={vbY} width={vbW} height={vbH} fill="url(#gridLarge)" pointerEvents="none"/>}<g opacity=".75" pointerEvents="none"><line x1="35" y1={H-35} x2="88" y2={H-35} stroke="#17324b" strokeWidth="2"/><line x1="35" y1={H-35} x2="35" y2={H-88} stroke="#17324b" strokeWidth="2"/><text x="92" y={H-30} className="axisLabel">X</text><text x="26" y={H-92} className="axisLabel">Y</text></g>
+    {model.elements.map(e=>{const nA=nodeMap.get(e.n1)?.n,nB=nodeMap.get(e.n2)?.n;if(!nA||!nB)return null;const a=P(nA),b=P(nB),le=Math.hypot(nB.x-nA.x,nB.y-nA.y),loads=displayLoads(e,le);return <g key={e.id}><g onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Carga'){onOpenMemberLoad(e.id);return}if(tool==='Apagar'){onDeleteElement(e.id);return}setSelected(e.id)}} className={`clickable memberTarget ${tool==='Carga'||tool==='Apagar'?'editTarget':''}`}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth="28"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={selected===e.id?'#1e63b5':'#263b4d'} strokeWidth={selected===e.id?10:7} strokeLinecap="round"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d8d8d8" strokeWidth={selected===e.id?6:4} strokeLinecap="round"/>{showLabels&&<><text x={(a.x+b.x)/2} y={(a.y+b.y)/2-13} className="memberLabel">B{e.id}</text>{selected===e.id&&<text x={(a.x+b.x)/2} y={(a.y+b.y)/2+24} className="dimLabel">{fmt(le,2)} m</text>}</>}</g>{showLoads&&loads.map((l,i)=>loadGlyph(e,a,b,le,l,i))}</g>})}
+    {draftA&&draftB&&<g pointerEvents="none"><line x1={draftA.x} y1={draftA.y} x2={draftB.x} y2={draftB.y} stroke="#1e63b5" strokeWidth="6" strokeDasharray="12 8"/><circle cx={draftA.x} cy={draftA.y} r="11" fill="#fff" stroke="#1e63b5" strokeWidth="3"/><circle cx={draftB.x} cy={draftB.y} r="8" fill="#e9f3ff" stroke="#1e63b5" strokeWidth="2"/></g>}
+    {result&&diagram==='Deformada'&&model.elements.map(e=>{const na=nodeMap.get(e.n1)?.n,nb=nodeMap.get(e.n2)?.n;if(!na||!nb)return null;const a=DP(na),b=DP(nb);return <line key={`def-${e.id}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1476d4" strokeWidth="3" strokeDasharray="8 6" opacity=".95" pointerEvents="none"/>})}
+    {result&&diagram!=='Deformada'&&diagramPoints&&<><polyline points={diagramPoints} fill="none" stroke="#c91c23" strokeWidth="3.5" pointerEvents="none"/><text x={W-215} y="35" className="diagramLabel">{diagram}: máx. {fmt(diagramMax/selectedFactor,2)} {selectedUnit}</text></>}
+    {model.nodes.map(n=>{const pnt=P(n),hasSupport=!!(n.fixX||n.fixY||n.fixR);return <g key={n.id} className={tool==='Apoio'||tool==='Carga'||tool==='Mover'||tool==='Barra'?'editTarget':''} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNode(n.id);return}if(tool==='Mover'){ev.stopPropagation();setDragNodeId(n.id);(ev.currentTarget as SVGGElement).setPointerCapture?.(ev.pointerId);return}if(tool==='Barra'){ev.stopPropagation();onCanvasPoint(n.x,n.y);return}if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id);return}if(tool==='Carga'){ev.stopPropagation();onOpenNodalLoad(n.id);return}}}>{showNodes?<circle cx={pnt.x} cy={pnt.y} r="9" fill="#fff" stroke="#263b4d" strokeWidth="3"/>:<circle cx={pnt.x} cy={pnt.y} r="18" fill="transparent" stroke="none"/>}{showNodes&&showLabels&&<text x={pnt.x+12} y={pnt.y-12} className="nodeLabel">N{n.id}</text>}{barDraft?.nodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="16" fill="none" stroke="#1e63b5" strokeWidth="3" strokeDasharray="4 3"/>}{hasSupport&&<g className={`${tool==='Apagar'?'deleteTarget supportTarget':''} ${tool==='Apoio'?'editTarget':''}`} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteSupport(n.id)}else if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id)}}}>{n.fixR?<><rect x={pnt.x-18} y={pnt.y+5} width="36" height="18" fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-25} y1={pnt.y+25} x2={pnt.x+25} y2={pnt.y+25} stroke="#263b4d" strokeWidth="4"/></>:<><path d={`M ${pnt.x-18} ${pnt.y+20} L ${pnt.x+18} ${pnt.y+20} L ${pnt.x} ${pnt.y+5} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/>{!n.fixX&&n.fixY&&<><circle cx={pnt.x-10} cy={pnt.y+25} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><circle cx={pnt.x+10} cy={pnt.y+25} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><line x1={pnt.x-24} y1={pnt.y+31} x2={pnt.x+24} y2={pnt.y+31} stroke="#263b4d" strokeWidth="2"/></>}{n.fixX&&n.fixY&&<line x1={pnt.x-24} y1={pnt.y+22} x2={pnt.x+24} y2={pnt.y+22} stroke="#263b4d" strokeWidth="2"/>}</>}</g>}{showLoads&&(n.fy??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fy');else if(tool==='Carga'||tool==='Selecionar')onOpenNodalLoad(n.id)}}><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {fmt(n.fy)} kN</text></g>}{showLoads&&(n.fx??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fx');else if(tool==='Carga'||tool==='Selecionar')onOpenNodalLoad(n.id)}}><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x-68} y={pnt.y-10} className="loadLabel">H = {fmt(n.fx)} kN</text></g>}{showLoads&&(n.mz??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'mz');else if(tool==='Carga'||tool==='Selecionar')onOpenNodalLoad(n.id)}}><path d={`M ${pnt.x-28} ${pnt.y-28} A 28 28 0 1 1 ${pnt.x+26} ${pnt.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3"/><text x={pnt.x+30} y={pnt.y-32} className="loadLabel">M = {fmt(n.mz)} kNm</text></g>}</g>})}
+    {!model.nodes.length&&<><text x={W/2} y={H/2-12} textAnchor="middle" className="emptyCanvasTitle" pointerEvents="none">Modelo vazio</text><text x={W/2} y={H/2+18} textAnchor="middle" className="emptyCanvasHint" pointerEvents="none">Escolha Barra, Nó ou Apoio e toque diretamente na grelha.</text></>}{result&&diagram==='Deformada'&&<text x="18" y="28" className="deformLabel">Deformada ampliada ×{fmt(deformScale,1)}</text>}
   </svg>
 }
 function Diagram({member,kind}:{member:MemberResult;kind:'N'|'V'|'M'}){
@@ -314,11 +327,14 @@ export default function App(){
   const [showGrid,setShowGrid]=useState(true)
   const [showLabels,setShowLabels]=useState(true)
   const [showLoads,setShowLoads]=useState(true)
-  const [showNodes,setShowNodes]=useState(()=>(localStorage.getItem('rjp-structures-show-nodes-v175')??localStorage.getItem('rjp-structures-show-nodes-v172'))!=='false')
+  const [showNodes,setShowNodes]=useState(()=>(localStorage.getItem('rjp-structures-show-nodes-v176')??localStorage.getItem('rjp-structures-show-nodes-v175')??localStorage.getItem('rjp-structures-show-nodes-v172'))!=='false')
   const [newProjectOpen,setNewProjectOpen]=useState(false)
   const [newMode,setNewMode]=useState<Mode>('Viga')
   const [newPreset,setNewPreset]=useState<StartPreset>('Barra + nós')
-  const [barStartNodeId,setBarStartNodeId]=useState<number|null>(null)
+  const [barDraft,setBarDraft]=useState<BarDraft>(null)
+  const [editorDialog,setEditorDialog]=useState<EditorDialog>(null)
+  const [nodalForm,setNodalForm]=useState<NodalForm>({fx:0,fy:0,mz:0})
+  const [memberForm,setMemberForm]=useState<MemberForm>({type:'point',axis:'localY',P:-25,M:10,x:0,x1:0,x2:1,q1:-8,q2:-8})
   const [projectName,setProjectName]=useState(()=>localStorage.getItem('rjp-structures-project-name-v17')||localStorage.getItem('rjp-structures-project-name-v16')||'Projeto estrutural')
   const [ui,setUi]=useState<UiSettings>(()=>{try{const raw=localStorage.getItem('rjp-structures-ui-v17');return raw?{...DEFAULT_UI,...JSON.parse(raw)}:DEFAULT_UI}catch{return DEFAULT_UI}})
   const [lastAutoSave,setLastAutoSave]=useState<string>(()=>localStorage.getItem('rjp-structures-autosave-time-v17')||'')
@@ -347,7 +363,7 @@ export default function App(){
 
 
   const [customModels,setCustomModels]=useState<Partial<Record<Mode,Model2D>>>(()=>{
-    try{const raw=localStorage.getItem('rjp-structures-custom-models-v175')||localStorage.getItem('rjp-structures-custom-models-v172');return raw?JSON.parse(raw):{}}catch{return {}}
+    try{const raw=localStorage.getItem('rjp-structures-custom-models-v176')||localStorage.getItem('rjp-structures-custom-models-v175')||localStorage.getItem('rjp-structures-custom-models-v172');return raw?JSON.parse(raw):{}}catch{return {}}
   })
 
   useEffect(()=>{
@@ -368,12 +384,12 @@ export default function App(){
   useEffect(()=>{localStorage.setItem('rjp-structures-project-name-v17',projectName)},[projectName])
   useEffect(()=>{localStorage.setItem('rjp-structures-mode-v17',mode)},[mode])
   useEffect(()=>{localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui));document.documentElement.style.setProperty('--ui-scale',String(ui.fontScale));document.documentElement.style.setProperty('--canvas-scale',String(ui.canvasTextScale))},[ui])
-  useEffect(()=>{localStorage.setItem('rjp-structures-custom-models-v175',JSON.stringify(customModels))},[customModels])
-  useEffect(()=>{localStorage.setItem('rjp-structures-show-nodes-v175',String(showNodes))},[showNodes])
+  useEffect(()=>{localStorage.setItem('rjp-structures-custom-models-v176',JSON.stringify(customModels))},[customModels])
+  useEffect(()=>{localStorage.setItem('rjp-structures-show-nodes-v176',String(showNodes))},[showNodes])
   useEffect(()=>{
     const timer=window.setTimeout(()=>{
       const savedAt=new Date().toISOString()
-      const snapshot:ProjectFile={version:'1.7.5',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt}
+      const snapshot:ProjectFile={version:'1.7.6',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt}
       localStorage.setItem('rjp-structures-autosave-v17',JSON.stringify(snapshot))
       localStorage.setItem('rjp-structures-autosave-time-v17',savedAt)
       setLastAutoSave(savedAt)
@@ -406,104 +422,51 @@ export default function App(){
     editCurrentModel(cur=>cur.removedNodalLoads.some(x=>x.nodeId===nodeId&&x.component===component)?cur:{...cur,removedNodalLoads:[...cur.removedNodalLoads,{nodeId,component}]})
   }
   function restoreModeLoadsAndSupports(){setModelEdits(prev=>({...prev,[mode]:emptyModelEdits()}))}
-  function cycleSupport(nodeId:number){
+  function setSupportState(nodeId:number,fixX:boolean,fixY:boolean,fixR:boolean){
+    editCurrentModel(cur=>({...cur,removedSupports:cur.removedSupports.filter(id=>id!==nodeId),supportOverrides:[...cur.supportOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,fixX,fixY,fixR}]}))
+  }
+  function openSupportEditor(nodeId:number){setEditorDialog({kind:'support',nodeId})}
+  function openNodalEditor(nodeId:number){
     const node=model.nodes.find(n=>n.id===nodeId);if(!node)return
-    const states=[{fixX:false,fixY:false,fixR:false},{fixX:false,fixY:true,fixR:false},{fixX:true,fixY:true,fixR:false},{fixX:true,fixY:true,fixR:true}]
-    const idx=states.findIndex(x=>x.fixX===!!node.fixX&&x.fixY===!!node.fixY&&x.fixR===!!node.fixR)
-    const next=states[(idx<0?0:idx+1)%states.length]
-    editCurrentModel(cur=>({...cur,removedSupports:cur.removedSupports.filter(id=>id!==nodeId),supportOverrides:[...cur.supportOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,...next}]}))
+    setNodalForm({fx:node.fx??0,fy:node.fy??0,mz:node.mz??0});setEditorDialog({kind:'nodal',nodeId})
   }
-  function editNodalLoad(nodeId:number){
-    const node=model.nodes.find(n=>n.id===nodeId);if(!node)return
-    const raw=window.prompt('Ações no nó em kN/kNm: Fx, Fy, Mz\nExemplo: 10, -25, 0',`${node.fx??0}, ${node.fy??0}, ${node.mz??0}`)
-    if(raw===null)return
-    const parts=raw.split(/[;,\s]+/).filter(Boolean).map(Number)
-    if(parts.length<3||parts.some(v=>!Number.isFinite(v))){alert('Introduza três valores válidos: Fx, Fy, Mz.');return}
-    const [fx,fy,mz]=parts
-    editCurrentModel(cur=>({...cur,
-      removedNodalLoads:cur.removedNodalLoads.filter(x=>x.nodeId!==nodeId),
-      nodalLoadOverrides:[...cur.nodalLoadOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,fx,fy,mz}]
-    }))
-  }
-  function readNumber(message:string,initial:number){
-    const raw=window.prompt(message,String(initial).replace('.',','))
-    if(raw===null)return null
-    const v=Number(raw.trim().replace(',','.'))
-    if(!Number.isFinite(v)){alert('Introduza um valor numérico válido.');return null}
-    return v
-  }
-  function createMemberAction(elementId:number,type?:MemberLoadType,current?:MemberLoad):MemberLoad|null{
-    const element=model.elements.find(e=>e.id===elementId);if(!element)return null
-    const a=model.nodes.find(n=>n.id===element.n1),b=model.nodes.find(n=>n.id===element.n2);if(!a||!b)return null
-    const L=Math.hypot(b.x-a.x,b.y-a.y)
-    let chosen=type
-    if(!chosen){
-      if(element.kind==='truss')chosen='point'
-      else{
-        const raw=window.prompt('Tipo de ação na barra:\n1 = Concentrada\n2 = Distribuída uniforme\n3 = Triangular\n4 = Trapezoidal\n5 = Momento aplicado',current?String(['point','uniform','triangular','trapezoidal','moment'].indexOf(current.type)+1):'1')
-        if(raw===null)return null
-        chosen=({'1':'point','2':'uniform','3':'triangular','4':'trapezoidal','5':'moment'} as Record<string,MemberLoadType>)[raw.trim()]
-        if(!chosen){alert('Escolha um tipo entre 1 e 5.');return null}
-      }
-    }
-    const id=current?.id&&current.id!=='legacy-qy'?current.id:`A${Date.now().toString(36)}`
-    if(chosen==='point'){
-      let axial=element.kind==='truss'
-      if(element.kind!=='truss'){
-        const axisRaw=window.prompt('Direção da força concentrada:\n1 = transversal (eixo local Y)\n2 = axial (eixo local X)','1')
-        if(axisRaw===null)return null
-        if(axisRaw.trim()!=='1'&&axisRaw.trim()!=='2'){alert('Escolha 1 ou 2.');return null}
-        axial=axisRaw.trim()==='2'
-      }
-      const P=readNumber(`Força P [kN].\nSinal ${axial?'positivo = +X local':'positivo = +Y local'}.`,current?.P??-25);if(P===null)return null
-      const x=readNumber(`Posição x desde o nó inicial [m] (0 a ${fmt(L,3)}).`,current?.x??L/2);if(x===null)return null
-      return {id,type:'point',axis:axial?'localX':'localY',P,x:clamp(x,0,L)}
-    }
-    if(chosen==='moment'){
-      if(element.kind==='truss'){alert('Um momento de barra não é compatível com um elemento de treliça axial.');return null}
-      const M=readNumber('Momento aplicado M [kNm].\nPositivo = anti-horário no eixo local.',current?.M??10);if(M===null)return null
-      const x=readNumber(`Posição x desde o nó inicial [m] (0 a ${fmt(L,3)}).`,current?.x??L/2);if(x===null)return null
-      return {id,type:'moment',axis:'localY',M,x:clamp(x,0,L)}
-    }
-    if(element.kind==='truss'){alert('Cargas distribuídas não são compatíveis com barras de treliça neste motor. Use cargas nodais ou força axial concentrada.');return null}
-    let x1=readNumber(`Início da carga x1 [m] (0 a ${fmt(L,3)}).`,current?.x1??0);if(x1===null)return null
-    let x2=readNumber(`Fim da carga x2 [m] (0 a ${fmt(L,3)}).`,current?.x2??L);if(x2===null)return null
-    x1=clamp(x1,0,L);x2=clamp(x2,0,L);if(x2<x1)[x1,x2]=[x2,x1]
-    if(Math.abs(x2-x1)<1e-6){alert('x1 e x2 têm de definir um troço com comprimento.');return null}
-    if(chosen==='uniform'){
-      const q=readNumber('Carga uniforme q [kN/m].\nUse valor negativo para carga para baixo em barras horizontais.',current?.q1??-8);if(q===null)return null
-      return {id,type:'uniform',axis:'localY',x1,x2,q1:q,q2:q}
-    }
-    if(chosen==='triangular'){
-      const qmax=readNumber('Valor máximo q [kN/m].\nUse sinal negativo para carga para baixo numa viga horizontal.',current?.q2??current?.q1??-12);if(qmax===null)return null
-      const side=window.prompt('Posição da intensidade máxima:\n1 = início do troço\n2 = fim do troço','2')
-      if(side===null)return null
-      if(side.trim()!=='1'&&side.trim()!=='2'){alert('Escolha 1 ou 2.');return null}
-      const reverse=side.trim()==='1'
-      return {id,type:'triangular',axis:'localY',x1,x2,q1:reverse?qmax:0,q2:reverse?0:qmax}
-    }
-    const q1=readNumber('Intensidade q1 no início [kN/m].',current?.q1??-5);if(q1===null)return null
-    const q2=readNumber('Intensidade q2 no fim [kN/m].',current?.q2??-12);if(q2===null)return null
-    return {id,type:'trapezoidal',axis:'localY',x1,x2,q1,q2}
+  function saveNodalEditor(){
+    if(!editorDialog||editorDialog.kind!=='nodal')return
+    const nodeId=editorDialog.nodeId,{fx,fy,mz}=nodalForm
+    editCurrentModel(cur=>({...cur,removedNodalLoads:cur.removedNodalLoads.filter(x=>x.nodeId!==nodeId),nodalLoadOverrides:[...cur.nodalLoadOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,fx,fy,mz}]}))
+    setShowLoads(true);setEditorDialog(null)
   }
   function setElementActions(elementId:number,actions:MemberLoad[]){
     const next=cloneModel(model),e=next.elements.find(x=>x.id===elementId);if(!e)return
     e.qy=undefined;e.loads=actions.map(a=>({...a}))
     commitGeometry(next)
   }
-  function addMemberLoad(elementId:number,type?:MemberLoadType){
+  function openMemberEditor(elementId:number,loadId?:string,type:MemberLoadType='point'){
     const e=model.elements.find(x=>x.id===elementId);if(!e)return
-    const action=createMemberAction(elementId,type);if(!action)return
-    const a=model.nodes.find(n=>n.id===e.n1),b=model.nodes.find(n=>n.id===e.n2),L=a&&b?Math.hypot(b.x-a.x,b.y-a.y):0
-    const existing=displayLoads(e,L).filter(l=>l.id!=='legacy-qy')
-    setElementActions(elementId,[...existing,action]);setSelected(elementId)
+    const a=model.nodes.find(n=>n.id===e.n1),b=model.nodes.find(n=>n.id===e.n2),L=a&&b?Math.hypot(b.x-a.x,b.y-a.y):1
+    const existing=loadId?displayLoads(e,L).find(l=>l.id===loadId):undefined
+    const chosen=existing?.type??type
+    setMemberForm({type:chosen,axis:(existing?.axis??'localY') as 'localY'|'localX',P:existing?.P??-25,M:existing?.M??10,x:existing?.x??L/2,x1:existing?.x1??0,x2:existing?.x2??L,q1:existing?.q1??-8,q2:existing?.q2??(chosen==='triangular'?0:-8)})
+    setSelected(elementId);setEditorDialog({kind:'member',elementId,loadId})
   }
-  function editMemberLoad(elementId:number,loadId:string){
-    const e=model.elements.find(x=>x.id===elementId);if(!e)return
-    const a=model.nodes.find(n=>n.id===e.n1),b=model.nodes.find(n=>n.id===e.n2),L=a&&b?Math.hypot(b.x-a.x,b.y-a.y):0
-    const list=displayLoads(e,L),old=list.find(l=>l.id===loadId);if(!old)return
-    const updated=createMemberAction(elementId,old.type,old);if(!updated)return
-    setElementActions(elementId,list.filter(l=>l.id!==loadId&&l.id!=='legacy-qy').concat(updated));setSelected(elementId)
+  function addMemberLoad(elementId:number,type?:MemberLoadType){openMemberEditor(elementId,undefined,type??'point')}
+  function editMemberLoad(elementId:number,loadId:string){openMemberEditor(elementId,loadId)}
+  function saveMemberEditor(){
+    if(!editorDialog||editorDialog.kind!=='member')return
+    const elementId=editorDialog.elementId,e=model.elements.find(x=>x.id===elementId);if(!e)return
+    const a=model.nodes.find(n=>n.id===e.n1),b=model.nodes.find(n=>n.id===e.n2),L=a&&b?Math.hypot(b.x-a.x,b.y-a.y):1
+    let action:MemberLoad
+    const id=editorDialog.loadId&&editorDialog.loadId!=='legacy-qy'?editorDialog.loadId:`A${Date.now().toString(36)}`
+    const x=clamp(memberForm.x,0,L),x1=clamp(Math.min(memberForm.x1,memberForm.x2),0,L),x2=clamp(Math.max(memberForm.x1,memberForm.x2),0,L)
+    if(memberForm.type==='point')action={id,type:'point',axis:memberForm.axis,P:memberForm.P,x}
+    else if(memberForm.type==='moment')action={id,type:'moment',axis:'localY',M:memberForm.M,x}
+    else if(memberForm.type==='uniform')action={id,type:'uniform',axis:'localY',x1,x2,q1:memberForm.q1,q2:memberForm.q1}
+    else if(memberForm.type==='triangular')action={id,type:'triangular',axis:'localY',x1,x2,q1:memberForm.q1,q2:memberForm.q2}
+    else action={id,type:'trapezoidal',axis:'localY',x1,x2,q1:memberForm.q1,q2:memberForm.q2}
+    if((action.type==='uniform'||action.type==='triangular'||action.type==='trapezoidal')&&x2-x1<0.001){alert('A carga distribuída precisa de um comprimento maior que zero.');return}
+    if(e.kind==='truss'&&action.type!=='point'){alert('Em barras de treliça, use apenas forças concentradas axiais.');return}
+    const existing=displayLoads(e,L).filter(l=>l.id!=='legacy-qy'&&l.id!==editorDialog.loadId)
+    setElementActions(elementId,[...existing,action]);setShowLoads(true);setEditorDialog(null)
   }
   function deleteMemberLoad(elementId:number,loadId:string){
     const e=model.elements.find(x=>x.id===elementId);if(!e)return
@@ -531,28 +494,35 @@ export default function App(){
     const Erc=concreteProps(settings.fck).Ecm,sec={b:settings.beamB,h:settings.beamH,cover:settings.cover,fck:settings.fck,fyk:settings.fyk}
     return {id,n1,n2,E:Erc,A:settings.beamB*settings.beamH,I:settings.beamB*settings.beamH**3/12,kind:'frame' as const,section:sec}
   }
+  function deleteElement(elementId:number){
+    const next=cloneModel(model);next.elements=next.elements.filter(e=>e.id!==elementId);commitGeometry(next)
+    setSelected(next.elements[0]?.id??1)
+  }
+  function deleteNode(nodeId:number){
+    const next=cloneModel(model);next.elements=next.elements.filter(e=>e.n1!==nodeId&&e.n2!==nodeId);next.nodes=next.nodes.filter(n=>n.id!==nodeId);commitGeometry(next);setSelected(next.elements[0]?.id??1)
+  }
+  function moveNode(nodeId:number,x:number,y:number){
+    const next=cloneModel(model),n=next.nodes.find(n=>n.id===nodeId);if(!n)return;n.x=x;n.y=y;commitGeometry(next)
+  }
   function handleCanvasPoint(x:number,y:number){
-    if(tool==='Nó'){addNodeToModel(x,y,false);setShowNodes(true);return}
+    if(tool==='Nó'){const near=nearestNodeId(x,y);if(near!==null)return;addNodeToModel(x,y,false);setShowNodes(true);return}
     if(tool==='Apoio'){
       const near=nearestNodeId(x,y)
-      if(near!==null){cycleSupport(near);return}
-      addNodeToModel(x,y,true);return
+      if(near!==null){openSupportEditor(near);return}
+      const id=addNodeToModel(x,y,true);setShowNodes(true);setEditorDialog({kind:'support',nodeId:id});return
     }
     if(tool==='Barra'){
-      let endId=nearestNodeId(x,y)
-      if(barStartNodeId===null){
-        if(endId===null)endId=addNodeToModel(x,y,false)
-        setBarStartNodeId(endId);return
-      }
-      if(endId===null)endId=addNodeToModel(x,y,false)
-      if(endId===barStartNodeId){setBarStartNodeId(null);return}
+      const near=nearestNodeId(x,y)
+      if(barDraft===null){setBarDraft({x,y,...(near!==null?{nodeId:near}:{})});return}
       const next=cloneModel(model)
-      // O nó final pode ter sido criado no clique atual e ainda não existir no snapshot anterior.
-      if(!next.nodes.some(n=>n.id===endId))next.nodes.push({id:endId,x,y})
-      if(!next.nodes.some(n=>n.id===barStartNodeId)){setBarStartNodeId(null);return}
-      const duplicate=next.elements.some(e=>(e.n1===barStartNodeId&&e.n2===endId)||(e.n1===endId&&e.n2===barStartNodeId))
-      if(!duplicate){const eid=Math.max(0,...next.elements.map(e=>e.id))+1;next.elements.push(makeElementForMode(eid,barStartNodeId,endId));commitGeometry(next);setSelected(eid)}
-      setBarStartNodeId(null)
+      let startId=barDraft.nodeId
+      if(startId===undefined){startId=Math.max(0,...next.nodes.map(n=>n.id))+1;next.nodes.push({id:startId,x:barDraft.x,y:barDraft.y})}
+      let endId=near
+      if(endId===null){endId=Math.max(startId,...next.nodes.map(n=>n.id))+1;next.nodes.push({id:endId,x,y})}
+      if(endId===startId){setBarDraft(null);return}
+      const duplicate=next.elements.some(e=>(e.n1===startId&&e.n2===endId)||(e.n1===endId&&e.n2===startId))
+      if(!duplicate){const eid=Math.max(0,...next.elements.map(e=>e.id))+1;next.elements.push(makeElementForMode(eid,startId,endId));commitGeometry(next);setSelected(eid)}
+      setBarDraft(null);return
     }
   }
   function createNewProject(){
@@ -561,7 +531,7 @@ export default function App(){
     const starter=starterModel(newMode,newPreset,fresh)
     setCustomModels(starter?{[newMode]:starter}:{})
     const nodesVisible=newPreset==='Barra + nós'||newPreset==='Nós'||newPreset==='Padrão'
-    setShowNodes(nodesVisible);setShowLabels(nodesVisible);setSelected(1);setTab('Modelo');setZoom(1);setBarStartNodeId(null);setProjectName('Projeto estrutural');setNewProjectOpen(false)
+    setShowNodes(nodesVisible);setShowLabels(nodesVisible);setSelected(1);setTab('Modelo');setZoom(1);setBarDraft(null);setProjectName('Projeto estrutural');setNewProjectOpen(false)
   }
 
   function undo(){
@@ -667,7 +637,7 @@ export default function App(){
     if(p.ui)setUi({...DEFAULT_UI,...p.ui})
     setCustomModels(p.customModels??{})
     if(typeof p.showNodes==='boolean')setShowNodes(p.showNodes)
-    setBarStartNodeId(null)
+    setBarDraft(null)
   }
   function saveProject(){
     localStorage.setItem('rjp-structures-v17',JSON.stringify(settings))
@@ -675,14 +645,14 @@ export default function App(){
     localStorage.setItem('rjp-structures-project-name-v17',projectName)
     localStorage.setItem('rjp-structures-model-edits-v17',JSON.stringify(modelEdits))
     localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui))
-    localStorage.setItem('rjp-structures-custom-models-v175',JSON.stringify(customModels))
-    localStorage.setItem('rjp-structures-show-nodes-v175',String(showNodes))
+    localStorage.setItem('rjp-structures-custom-models-v176',JSON.stringify(customModels))
+    localStorage.setItem('rjp-structures-show-nodes-v176',String(showNodes))
     const now=new Date().toISOString();setLastAutoSave(now);localStorage.setItem('rjp-structures-autosave-time-v17',now)
   }
   function exportProject(){
-    const file:ProjectFile={version:'1.7.5',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt:new Date().toISOString()}
+    const file:ProjectFile={version:'1.7.6',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt:new Date().toISOString()}
     const blob=new Blob([JSON.stringify(file,null,2)],{type:'application/json'})
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${projectName.replace(/[^a-z0-9_-]+/gi,'_')||'RJP_Structures'}_V1_7_5.json`;a.click();URL.revokeObjectURL(a.href)
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${projectName.replace(/[^a-z0-9_-]+/gi,'_')||'RJP_Structures'}_V1_7_6.json`;a.click();URL.revokeObjectURL(a.href)
   }
   function importProject(e:ChangeEvent<HTMLInputElement>){
     const f=e.target.files?.[0];if(!f)return
@@ -698,10 +668,10 @@ export default function App(){
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveProject()}
-      if(e.key==='Escape'&&focusMode)setFocusMode(false)
+      if(e.key==='Escape'){if(editorDialog)setEditorDialog(null);else if(barDraft)setBarDraft(null);else if(focusMode)setFocusMode(false)}
     }
     window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey)
-  },[history,future,settings,mode,projectName,focusMode])
+  },[history,future,settings,mode,projectName,focusMode,editorDialog,barDraft])
 
   const toolIcons:Record<Tool,string>={Selecionar:'↖',Nó:'○',Barra:'╱',Apoio:'△',Carga:'↓',Mover:'✥',Apagar:'⌫'}
   const bottomTabs:{tab:Tab;icon:string;label:string}[]=[
@@ -727,15 +697,15 @@ export default function App(){
     </header>
 
     <div className="modelStrip">
-      <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setTab('Modelo');setZoom(1);setBarStartNodeId(null)}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
+      <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setTab('Modelo');setZoom(1);setBarDraft(null)}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
       <div className="projectTitle"><input className="projectNameInput" value={projectName} onChange={(e:any)=>setProjectName(e.target.value)} aria-label="Nome do projeto"/><span>EC2 · MEF 2D · Português de Portugal</span></div>
       <div className="historyActions" aria-label="Histórico de edição"><button onClick={undo} disabled={!history.length} title="Desfazer (Ctrl+Z)">↶</button><button onClick={redo} disabled={!future.length} title="Refazer (Ctrl+Y)">↷</button></div>
-      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.5</div>
+      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.6</div>
     </div>
 
     <main className={`studioLayout ${panelCollapsed?'panelCollapsed':''} ${focusMode?'focusMode':''}`}>
       <aside className="leftToolbar" aria-label="Ferramentas de desenho">
-        {(['Selecionar','Nó','Barra','Apoio','Carga','Mover','Apagar'] as Tool[]).map(t=><button key={t} className={tool===t?'active':''} onClick={()=>{setTool(t);if(t!=='Barra')setBarStartNodeId(null)}} title={t}><span className="toolIcon">{toolIcons[t]}</span><small>{t}</small></button>)}
+        {(['Selecionar','Nó','Barra','Apoio','Carga','Mover','Apagar'] as Tool[]).map(t=><button key={t} className={tool===t?'active':''} onClick={()=>{setTool(t);if(t!=='Barra')setBarDraft(null)}} title={t}><span className="toolIcon">{toolIcons[t]}</span><small>{t}</small></button>)}
       </aside>
 
       <section className="workspace mockupWorkspace">
@@ -755,8 +725,8 @@ export default function App(){
             </div>
           </div>
         </div>
-        <ModelView model={model} result={result} selected={selected} setSelected={setSelected} diagram={canvasResult} zoom={zoom} setZoom={setZoom} showGrid={showGrid} showLabels={showLabels} showLoads={showLoads} showNodes={showNodes} tool={tool} barStartNodeId={barStartNodeId} onCanvasPoint={handleCanvasPoint} onDeleteSupport={deleteSupport} onDeleteNodalLoad={deleteNodalLoad} onDeleteMemberLoad={deleteMemberLoad} onCycleSupport={cycleSupport} onEditNodalLoad={editNodalLoad} onAddMemberLoad={addMemberLoad} onEditMemberLoad={editMemberLoad}/>
-        <div className="canvasStatus"><span><b>Ferramenta:</b> {tool}</span>{tool==='Apagar'&&<span className="deleteHint"><b>Apagar:</b> toque numa força, momento, ação de barra ou apoio</span>}{tool==='Apoio'&&<span className="editHint"><b>Apoio:</b> toque num nó ou numa zona vazia para criar</span>}{tool==='Barra'&&<span className="editHint"><b>Barra:</b> {barStartNodeId===null?'toque no ponto inicial':'toque no ponto final'}</span>}{tool==='Nó'&&<span className="editHint"><b>Nó:</b> toque na grelha para criar</span>}{tool==='Carga'&&<span className="editHint"><b>Carga:</b> toque num nó ou numa barra</span>}<span><b>Nós:</b> {model.nodes.length}</span><span><b>Barras:</b> {model.elements.length}</span><span><b>Zoom:</b> {fmt(zoom*100,0)}%</span><span><b>Cálculo:</b> {analysis.ok?'atualizado automaticamente':'verificar modelo'}</span></div>
+        <ModelView model={model} result={result} selected={selected} setSelected={setSelected} diagram={canvasResult} zoom={zoom} setZoom={setZoom} showGrid={showGrid} showLabels={showLabels} showLoads={showLoads} showNodes={showNodes} tool={tool} barDraft={barDraft} onCanvasPoint={handleCanvasPoint} onDeleteSupport={deleteSupport} onDeleteNodalLoad={deleteNodalLoad} onDeleteMemberLoad={deleteMemberLoad} onOpenSupport={openSupportEditor} onOpenNodalLoad={openNodalEditor} onOpenMemberLoad={openMemberEditor} onDeleteElement={deleteElement} onDeleteNode={deleteNode} onMoveNode={moveNode}/>
+        <div className="canvasStatus"><span><b>Ferramenta:</b> {tool}</span>{tool==='Apagar'&&<span className="deleteHint"><b>Apagar:</b> toque numa barra, força, momento, ação de barra ou apoio</span>}{tool==='Apoio'&&<span className="editHint"><b>Apoio:</b> toque num nó ou numa zona vazia para criar</span>}{tool==='Barra'&&<span className="editHint"><b>Barra:</b> {barDraft===null?'toque no ponto inicial':'toque no ponto final · linha azul = pré-visualização'}</span>}{tool==='Nó'&&<span className="editHint"><b>Nó:</b> toque na grelha para criar</span>}{tool==='Carga'&&<span className="editHint"><b>Carga:</b> toque num nó ou numa barra</span>}<span><b>Nós:</b> {model.nodes.length}</span><span><b>Barras:</b> {model.elements.length}</span><span><b>Zoom:</b> {fmt(zoom*100,0)}%</span><span><b>Cálculo:</b> {analysis.ok?'atualizado automaticamente':'verificar modelo'}</span></div>
         <div className="quickResults">
           <div><span>MEd</span><b>{isTruss?'—':`${fmt(med)} kNm`}</b></div>
           <div><span>VEd</span><b>{isTruss?'—':`${fmt(ved)} kN`}</b></div>
@@ -782,7 +752,7 @@ export default function App(){
           {mode==='Viga'&&<div className="fields singleColumn"><NumInput label="Vão total" value={settings.beamSpan} onChange={v=>set('beamSpan',v)} unit="m" step={0.1} min={1}/><NumInput label="Largura b" value={settings.beamB} onChange={v=>set('beamB',v)} unit="mm" step={10} min={100}/><NumInput label="Altura h" value={settings.beamH} onChange={v=>set('beamH',v)} unit="mm" step={10} min={150}/></div>}
           {mode==='Pórtico 2D'&&<div className="fields singleColumn"><NumInput label="Vão" value={settings.frameWidth} onChange={v=>set('frameWidth',v)} unit="m" step={0.1} min={1}/><NumInput label="Altura" value={settings.frameHeight} onChange={v=>set('frameHeight',v)} unit="m" step={0.1} min={1}/><NumInput label="Viga b" value={settings.beamB} onChange={v=>set('beamB',v)} unit="mm" step={10} min={100}/><NumInput label="Viga h" value={settings.beamH} onChange={v=>set('beamH',v)} unit="mm" step={10} min={150}/><NumInput label="Pilar b" value={settings.colB} onChange={v=>set('colB',v)} unit="mm" step={10} min={150}/><NumInput label="Pilar h" value={settings.colH} onChange={v=>set('colH',v)} unit="mm" step={10} min={150}/></div>}
           {mode==='Treliça 2D'&&<div className="fields singleColumn"><NumInput label="Vão" value={settings.trussSpan} onChange={v=>set('trussSpan',v)} unit="m" step={0.1} min={1}/><NumInput label="Altura" value={settings.trussHeight} onChange={v=>set('trussHeight',v)} unit="m" step={0.1} min={.5}/><NumInput label="Área da barra" value={settings.trussA} onChange={v=>set('trussA',v)} unit="mm²" step={100} min={100}/></div>}
-          <div className="card info compact"><b>Editor gráfico V1.7.5 {freeModel?'· modelo livre':'· modelo paramétrico'}</b><p>Em <b>Nó</b>, toque na grelha para criar. Em <b>Barra</b>, indique o ponto inicial e final; os nós necessários são criados internamente e podem ficar ocultos. Em <b>Apoio</b>, pode tocar num nó existente ou diretamente na grelha para começar o modelo por um apoio. Em <b>Carga</b>, toque num nó ou numa barra para editar ações.</p></div>
+          <div className="card info compact"><b>Editor gráfico V1.7.6 {freeModel?'· modelo livre':'· modelo paramétrico'}</b><p>Em <b>Barra</b>, toque no início e no fim: a pré-visualização azul acompanha o cursor/dedo e os nós são criados automaticamente. Em <b>Apoio</b>, toque num ponto ou nó e escolha o tipo. Em <b>Carga</b>, toque diretamente num nó ou barra e use o editor visual. Em <b>Mover</b>, arraste um nó.</p></div>
         </>}
 
         {tab==='Cargas'&&<>
@@ -821,7 +791,7 @@ export default function App(){
         </>}
 
         {tab==='Relatório'&&<>
-          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.5 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p><p><b>Materiais:</b> {sec?`C${settings.fck} · aço fyk ${settings.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
+          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.6 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p><p><b>Materiais:</b> {sec?`C${settings.fck} · aço fyk ${settings.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
         </>}
 
         {tab==='Definições'&&<>
@@ -841,6 +811,9 @@ export default function App(){
       </aside>
     </main>
 
+    {editorDialog?.kind==='support'&&<div className="modalBackdrop editorBackdrop" onPointerDown={()=>setEditorDialog(null)}><div className="quickEditor" onPointerDown={e=>e.stopPropagation()}><div className="dialogHeader"><div><h2>Apoio · N{editorDialog.nodeId}</h2><p>Escolha o vínculo. A alteração é imediata.</p></div><button onClick={()=>setEditorDialog(null)}>×</button></div><div className="supportChoices"><button onClick={()=>{setSupportState(editorDialog.nodeId,false,false,false);setEditorDialog(null)}}>○<b>Livre</b><span>Sem restrições</span></button><button onClick={()=>{setSupportState(editorDialog.nodeId,false,true,false);setEditorDialog(null)}}>◉<b>Móvel Y</b><span>Restringe Y</span></button><button onClick={()=>{setSupportState(editorDialog.nodeId,true,false,false);setEditorDialog(null)}}>◉<b>Móvel X</b><span>Restringe X</span></button><button onClick={()=>{setSupportState(editorDialog.nodeId,true,true,false);setEditorDialog(null)}}>△<b>Articulado</b><span>Restringe X e Y</span></button><button onClick={()=>{setSupportState(editorDialog.nodeId,true,true,true);setEditorDialog(null)}}>▣<b>Encastrado</b><span>X, Y e rotação</span></button></div></div></div>}
+    {editorDialog?.kind==='nodal'&&<div className="modalBackdrop editorBackdrop" onPointerDown={()=>setEditorDialog(null)}><div className="quickEditor" onPointerDown={e=>e.stopPropagation()}><div className="dialogHeader"><div><h2>Ações no nó N{editorDialog.nodeId}</h2><p>Valores globais. Positivo: +X, +Y e momento anti-horário.</p></div><button onClick={()=>setEditorDialog(null)}>×</button></div><div className="editorFields"><NumInput label="Fx" value={nodalForm.fx} onChange={v=>setNodalForm(f=>({...f,fx:v}))} unit="kN" step={1}/><NumInput label="Fy" value={nodalForm.fy} onChange={v=>setNodalForm(f=>({...f,fy:v}))} unit="kN" step={1}/><NumInput label="Mz" value={nodalForm.mz} onChange={v=>setNodalForm(f=>({...f,mz:v}))} unit="kNm" step={1}/></div><div className="dialogActions"><button className="secondary" onClick={()=>setNodalForm({fx:0,fy:0,mz:0})}>Limpar</button><button className="secondary" onClick={()=>setEditorDialog(null)}>Cancelar</button><button className="primary" onClick={saveNodalEditor}>Aplicar</button></div></div></div>}
+    {editorDialog?.kind==='member'&&<div className="modalBackdrop editorBackdrop" onPointerDown={()=>setEditorDialog(null)}><div className="quickEditor memberEditor" onPointerDown={e=>e.stopPropagation()}><div className="dialogHeader"><div><h2>{editorDialog.loadId?'Editar ação':'Nova ação'} · B{editorDialog.elementId}</h2><p>Escolha o tipo e introduza os valores sem sair do desenho.</p></div><button onClick={()=>setEditorDialog(null)}>×</button></div><div className="loadTypeGrid">{([['point','Força concentrada'],['uniform','Distribuída uniforme'],['triangular','Triangular'],['trapezoidal','Trapezoidal'],['moment','Momento']] as [MemberLoadType,string][]).map(([t,label])=><button key={t} disabled={model.elements.find(e=>e.id===editorDialog.elementId)?.kind==='truss'&&t!=='point'} className={memberForm.type===t?'active':''} onClick={()=>setMemberForm(f=>({...f,type:t}))}>{label}</button>)}</div>{memberForm.type==='point'&&<div className="editorFields"><label className="field"><span>Direção</span><select value={memberForm.axis} onChange={e=>setMemberForm(f=>({...f,axis:e.target.value as 'localY'|'localX'}))}><option value="localY">Transversal · eixo local Y</option><option value="localX">Axial · eixo local X</option></select></label><NumInput label="P" value={memberForm.P} onChange={v=>setMemberForm(f=>({...f,P:v}))} unit="kN" step={1}/><NumInput label="Posição x" value={memberForm.x} onChange={v=>setMemberForm(f=>({...f,x:v}))} unit="m" step={0.1} min={0}/></div>}{memberForm.type==='moment'&&<div className="editorFields"><NumInput label="Momento M" value={memberForm.M} onChange={v=>setMemberForm(f=>({...f,M:v}))} unit="kNm" step={1}/><NumInput label="Posição x" value={memberForm.x} onChange={v=>setMemberForm(f=>({...f,x:v}))} unit="m" step={0.1} min={0}/></div>}{(memberForm.type==='uniform'||memberForm.type==='triangular'||memberForm.type==='trapezoidal')&&<div className="editorFields"><NumInput label="Início x1" value={memberForm.x1} onChange={v=>setMemberForm(f=>({...f,x1:v}))} unit="m" step={0.1} min={0}/><NumInput label="Fim x2" value={memberForm.x2} onChange={v=>setMemberForm(f=>({...f,x2:v}))} unit="m" step={0.1} min={0}/><NumInput label={memberForm.type==='uniform'?'q':'q1'} value={memberForm.q1} onChange={v=>setMemberForm(f=>({...f,q1:v}))} unit="kN/m" step={0.5}/>{memberForm.type!=='uniform'&&<NumInput label="q2" value={memberForm.q2} onChange={v=>setMemberForm(f=>({...f,q2:v}))} unit="kN/m" step={0.5}/>}</div>}<div className="signHint">Sinais: para uma viga horizontal, carga vertical para baixo = valor negativo. Momento positivo = anti-horário.</div><div className="dialogActions"><button className="secondary" onClick={()=>setEditorDialog(null)}>Cancelar</button><button className="primary" onClick={saveMemberEditor}>Aplicar ação</button></div></div></div>}
     {newProjectOpen&&<div className="modalBackdrop" onClick={()=>setNewProjectOpen(false)}>
       <div className="newModelDialog" onClick={e=>e.stopPropagation()}>
         <div className="dialogHeader"><div><h2>Novo modelo</h2><p>Escolha como pretende começar o modelo estrutural.</p></div><button onClick={()=>setNewProjectOpen(false)} aria-label="Fechar">×</button></div>
@@ -861,6 +834,6 @@ export default function App(){
     </div>}
 
     <nav className="bottomNav">{bottomTabs.map(x=><button key={x.tab} className={tab===x.tab?'active':''} onClick={()=>setTab(x.tab)}><span>{x.icon}</span><small>{x.label}</small></button>)}</nav>
-    <footer>RJP Structures V1.7.5 · WebApp + Android · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
+    <footer>RJP Structures V1.7.6 · WebApp + Android · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
   </div>
 }

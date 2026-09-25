@@ -1,4 +1,4 @@
-# Changelog — RJP Structures V1.7.5
+# Changelog — RJP Structures V1.7.6
 
 - Recupera a linha funcional posterior à V1.7.4 sem perder o editor livre da V1.7.2.
 - Nova lista `loads[]` por barra, permitindo várias ações simultâneas.

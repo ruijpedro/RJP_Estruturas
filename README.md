@@ -1,47 +1,16 @@
-# RJP Structures V1.7.5
+# RJP Structures V1.7.6
 
-Aplicação **WebApp/PWA + Android APK** (React + Vite + Capacitor) para **Vigas, Pórticos 2D e Treliças 2D**, com motor MEF, módulo de **Betão Armado EC2**, pormenorização esquemática e interface integralmente em **Português de Portugal**.
+## Novidades da V1.7.6
 
-## Novidades da V1.7.5
+Esta versão corrige o ponto mais importante do editor: **desenhar e editar diretamente no modelo tem de funcionar de forma fluida em rato, toque e caneta**.
 
-A V1.7.5 consolida as melhorias anteriores do editor livre e repõe/expande o sistema de ações de barra. Uma mesma barra pode agora ter **várias ações simultâneas e independentes**.
-
-### Ações disponíveis nas barras
-
-- força concentrada transversal em qualquer posição da barra;
-- força concentrada axial em qualquer posição da barra;
-- carga distribuída uniforme, total ou parcial;
-- carga triangular, total ou parcial;
-- carga trapezoidal, total ou parcial;
-- momento aplicado em qualquer posição da barra;
-- várias ações do mesmo tipo ou de tipos diferentes na mesma barra;
-- edição e eliminação individual de cada ação diretamente no desenho ou no painel **Cargas**;
-- sinais positivos/negativos preservados;
-- posições `x`, `x1` e `x2` medidas desde o nó inicial da barra.
-
-O motor converte estas ações em forças nodais equivalentes consistentes e recalcula automaticamente reações, deslocamentos e diagramas **N/V/M**. Para treliças, as ações próprias de barra são limitadas a forças axiais; as ações transversais devem ser aplicadas nos nós.
-
-### Novo modelo / editor livre
-
-Ao escolher **Novo**, é possível iniciar por:
-
-- modelo padrão;
-- modelo em branco;
-- apoios;
-- barra sem nós visíveis;
-- barra com nós;
-- apenas nós.
-
-As ferramentas **Nó**, **Barra** e **Apoio** criam geometria diretamente na grelha. A ferramenta **Carga** permite editar ações nodais (`Fx`, `Fy`, `Mz`) ou adicionar ações às barras. A ferramenta **Apagar** remove forças, momentos, ações de barra ou apoios.
-
-### Acessibilidade e segurança do projeto
-
-- tamanho do texto da interface: 90%, 100%, 115%, 130% ou 145%;
-- escala independente para textos do desenho;
-- contraste reforçado e áreas de toque maiores;
-- gravação automática e recuperação;
-- exportação/importação JSON;
-- WebApp instalável e utilização offline após a primeira visita.
+- **Barra**: toque no início e no fim; aparece uma pré-visualização azul e os nós são criados automaticamente.
+- **Apoio**: toque num ponto ou nó e escolha visualmente Livre, Móvel X/Y, Articulado ou Encastrado.
+- **Carga**: toque num nó para Fx/Fy/Mz ou numa barra para força concentrada, uniforme, triangular, trapezoidal ou momento.
+- **Mover**: arraste nós diretamente.
+- **Apagar**: elimina barras, nós, apoios, forças, momentos e ações de barra.
+- Mantém várias ações simultâneas na mesma barra, MEF 2D, EC2, Pormenorização, WebApp/PWA e APK Android.
+- O cache PWA foi atualizado para impedir que a WebApp continue a apresentar a interface antiga depois de uma atualização.
 
 ## Motor estrutural
 
@@ -73,13 +42,13 @@ npm run build
 
 O workflow usa Node 24, Java 21 e Capacitor 7. Gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-Artefacto esperado: **`RJP-Structures-V1.7.5-debug-apk`**.
+Artefacto esperado: **`RJP-Structures-V1.7.6-debug-apk`**.
 
 ## WebApp / GitHub Pages
 
 O workflow `WebApp GitHub Pages` compila e publica a pasta `dist`. Em **Settings → Pages**, selecionar **GitHub Actions** como origem.
 
-Artefacto esperado: **`RJP-Structures-V1.7.5-WebApp`**.
+Artefacto esperado: **`RJP-Structures-V1.7.6-WebApp`**.
 
 ## Ficheiros principais
 
@@ -89,6 +58,6 @@ Artefacto esperado: **`RJP-Structures-V1.7.5-WebApp`**.
 - `src/styles.css` — interface gráfica e acessibilidade;
 - `.github/workflows/android.yml` — build Android;
 - `.github/workflows/webapp.yml` — build/publicação WebApp;
-- `CHANGELOG_V1_7_5.md` — alterações desta versão;
-- `VALIDATION_V1_7_5.md` — validações efetuadas;
+- `CHANGELOG_V1_7_6.md` — alterações desta versão;
+- `VALIDATION_V1_7_6.md` — validações efetuadas;
 - `EC2_COVERAGE.md` — matriz de cobertura normativa.

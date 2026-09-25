@@ -1,4 +1,4 @@
-# Validação — RJP Structures V1.7.5
+# Validação — RJP Structures V1.7.6
 
 ## Motor MEF
 
