@@ -101,7 +101,7 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
 .signHint{background:#f3f6f8;border-left:4px solid #1e63b5;padding:9px 11px;border-radius:8px;font-size:10px;color:#526270;line-height:1.45}
 @media(max-width:700px){.supportChoices{grid-template-columns:repeat(2,minmax(0,1fr))}.editorFields{grid-template-columns:1fr}.loadTypeGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.quickEditor{padding:15px}}
 
-/* V1.7.7 — nós ≠ rótulas; ligações rígidas por defeito */
+/* V1.7.8 — apoios diretos; nós MEF ≠ rótulas; ligações rígidas por defeito */
 .releaseLabel{font-size:calc(10px * var(--canvas-scale));font-weight:900;fill:#c91c23}
 .connectionCard{border-left-color:#1e63b5;background:#f8fbff}
 .connectionCard>p{color:#536575}

@@ -1,6 +1,13 @@
-# RJP Structures V1.7.7
+# RJP Structures V1.7.8
 
-## Novidades da V1.7.7
+## Novidades da V1.7.8
+
+### Apoios sem rótula automática
+- Os apoios articulados e móveis são desenhados diretamente sob a barra, sem círculo entre a viga e o apoio.
+- Colocar um apoio restringe graus de liberdade do nó, mas **não** cria uma libertação da extremidade da barra.
+- A rótula de extremidade é uma propriedade separada da barra e só aparece quando o utilizador a ativa em **Ligações da barra**.
+- Os nós MEF estão ocultos por defeito; podem ser mostrados com o botão **Nós MEF**.
+
 
 Esta versão corrige a distinção entre **nó**, **apoio** e **rótula**.
 
@@ -44,13 +51,13 @@ npm run build
 
 O workflow usa Node 24, Java 21 e Capacitor 7. Gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-Artefacto esperado: **`RJP-Structures-V1.7.7-debug-apk`**.
+Artefacto esperado: **`RJP-Structures-V1.7.8-debug-apk`**.
 
 ## WebApp / GitHub Pages
 
 O workflow `WebApp GitHub Pages` compila e publica a pasta `dist`. Em **Settings → Pages**, selecionar **GitHub Actions** como origem.
 
-Artefacto esperado: **`RJP-Structures-V1.7.7-WebApp`**.
+Artefacto esperado: **`RJP-Structures-V1.7.8-WebApp`**.
 
 ## Ficheiros principais
 
@@ -60,6 +67,6 @@ Artefacto esperado: **`RJP-Structures-V1.7.7-WebApp`**.
 - `src/styles.css` — interface gráfica e acessibilidade;
 - `.github/workflows/android.yml` — build Android;
 - `.github/workflows/webapp.yml` — build/publicação WebApp;
-- `CHANGELOG_V1_7_7.md` — alterações desta versão;
-- `VALIDATION_V1_7_7.md` — validações efetuadas;
+- `CHANGELOG_V1_7_8.md` — alterações desta versão;
+- `VALIDATION_V1_7_8.md` — validações efetuadas;
 - `EC2_COVERAGE.md` — matriz de cobertura normativa.
