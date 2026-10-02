@@ -111,3 +111,22 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
 .segmented button{border:0;border-right:1px solid #cbd4dc;background:#fff;color:#33495b;padding:7px 10px;font-size:calc(9px * var(--ui-scale));font-weight:850;min-width:68px}
 .segmented button:last-child{border-right:0}.segmented button.active{background:#1e63b5;color:#fff}.segmented button.active.dangerChoice{background:#b01b26}
 @media(max-width:720px){.connectionRow{align-items:flex-start;flex-direction:column}.segmented{width:100%}.segmented button{flex:1}}
+
+/* V1.7.9 — editor contextual completo no painel da direita */
+.propertyTabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin:12px 0 16px;position:sticky;top:0;z-index:2;background:#fff;padding:7px 0;border-bottom:1px solid #dce3e8}
+.propertyTabs button{border:1px solid #cdd7df;border-radius:8px;background:#f6f8fa;color:#294257;min-height:36px;font-weight:800;font-size:calc(10px * var(--ui-scale));cursor:pointer;padding:7px 4px}
+.propertyTabs button.active,.propertyTabs button[aria-selected="true"]{background:#a7101d;color:#fff;border-color:#a7101d}
+.propertyEditor{display:flex;flex-direction:column;gap:10px;padding-bottom:18px;min-width:0}
+.propertyEditor h3{margin:10px 0 1px!important;letter-spacing:.025em}
+.propertyHint{border-left:4px solid #28669d;background:#edf5fb;padding:10px 12px;border-radius:7px;color:#344e62;font-size:calc(10px * var(--ui-scale));line-height:1.45}
+.propertyMetrics{display:flex;flex-wrap:wrap;gap:5px}
+.propertyMetrics span{padding:6px 8px;border:1px solid #dbe3e9;background:#f7f9fb;border-radius:7px;font-size:calc(10px * var(--ui-scale));font-weight:750}
+.inlineTools{display:flex;flex-wrap:wrap;gap:6px}.inlineTools button{flex:1;border:1px solid #b8cad8;background:#f0f6fa;color:#163e5e;border-radius:7px;padding:9px 7px;cursor:pointer;font-weight:800;font-size:calc(10px * var(--ui-scale))}
+.deleteInline{display:block;width:100%;margin:6px 0;border:1px solid #dcaeb4;color:#a41421;background:#fff7f8;border-radius:8px;padding:9px;font-weight:800;cursor:pointer;font-size:calc(10px * var(--ui-scale))}
+.sidebarActions button{flex:1 1 42%;min-height:34px}
+.sideLoad{border:1px solid #d7e0e7;border-radius:9px;background:#fbfcfd;overflow:hidden}
+.sideLoad.expanded{border-color:#1765a9;background:#fff;box-shadow:0 1px 5px rgba(30,99,181,.1)}
+.sideLoadTop{display:flex;align-items:stretch;gap:3px}.sideLoadSelect{border:0;background:transparent;display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:10px;gap:4px;flex:1;min-width:0;cursor:pointer;color:#263c4e}.sideLoadSelect b{font-size:calc(11px * var(--ui-scale))}.sideLoadSelect span{font-size:calc(9px * var(--ui-scale));color:#576a78;line-height:1.4}.sideLoadTop>.miniButton{margin:6px}
+.sideLoad.expanded .sideLoadSelect{background:#eff6fb}.sideLoadFields{padding:10px;border-top:1px solid #dbe5ed}.sideLoadFields .field{width:100%}
+.propertyDisclosure{border:1px solid #dee5ea;border-radius:9px;padding:9px;background:#fafbfc}.propertyDisclosure summary{font-weight:800;color:#274359;cursor:pointer}
+@media(max-width:720px){.propertyTabs{grid-template-columns:repeat(2,minmax(0,1fr))}.inlineTools{flex-direction:column}}

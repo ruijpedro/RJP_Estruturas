@@ -1,6 +1,20 @@
-# RJP Structures V1.7.8
+# RJP Structures V1.7.9
 
-## Novidades da V1.7.8
+## Novidades da V1.7.9 — painel totalmente editável
+
+No separador **Modelo** ou **Cargas**, o painel da direita tem quatro áreas:
+**Elemento**, **Ações**, **Nós e apoios** e **Materiais**.
+
+- Escolher uma barra e alterar comprimento, secção, recobrimento e ligações nos extremos.
+- Criar várias ações por barra e editar o tipo, posição, sentido e intensidade diretamente no painel.
+- Escolher um nó, deslocá-lo por coordenadas, atribuir/remover apoio e editar Fx, Fy e Mz.
+- As secções e materiais ficam guardados individualmente por barra; já não são substituídos pelas predefinições globais após cada atualização.
+- Campos numéricos aceitam `,` ou `.` decimal e aplicam o valor com Enter ou ao sair do campo.
+- Gravação automática, importação/exportação JSON, WebApp/PWA e APK mantidos.
+
+Para uma descrição técnica, consultar `CHANGELOG_V1_7_9.md`. Os limites de testes estão indicados em `VALIDATION_V1_7_9.md`.
+
+## Histórico: melhorias anteriores da V1.7.8
 
 ### Apoios sem rótula automática
 - Os apoios articulados e móveis são desenhados diretamente sob a barra, sem círculo entre a viga e o apoio.
@@ -51,13 +65,13 @@ npm run build
 
 O workflow usa Node 24, Java 21 e Capacitor 7. Gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-Artefacto esperado: **`RJP-Structures-V1.7.8-debug-apk`**.
+Artefacto esperado: **`RJP-Structures-V1.7.9-debug-apk`**.
 
 ## WebApp / GitHub Pages
 
 O workflow `WebApp GitHub Pages` compila e publica a pasta `dist`. Em **Settings → Pages**, selecionar **GitHub Actions** como origem.
 
-Artefacto esperado: **`RJP-Structures-V1.7.8-WebApp`**.
+Artefacto esperado: **`RJP-Structures-V1.7.9-WebApp`**.
 
 ## Ficheiros principais
 

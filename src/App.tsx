@@ -193,7 +193,19 @@ function applyCurrentElementProperties(base:Model2D,mode:Mode,s:Settings):Model2
 function cloneModel(m:Model2D):Model2D{return {nodes:m.nodes.map(n=>({...n})),elements:m.elements.map(e=>({...e,loads:e.loads?.map(l=>({...l})),section:e.section?{...e.section}:undefined}))}}
 
 function NumInput({label,value,onChange,unit,step=1,min}:{label:string;value:number;onChange:(v:number)=>void;unit?:string;step?:number;min?:number}){
-  return <label className="field"><span>{label}</span><div><input type="number" value={Number.isFinite(value)?value:''} step={step} min={min} onChange={(e:ChangeEvent<HTMLInputElement>)=>{const n=Number(e.target.value);if(Number.isFinite(n))onChange(min!==undefined?Math.max(min,n):n)}}/>{unit&&<small>{unit}</small>}</div></label>
+  const [draft,setDraft]=useState(Number.isFinite(value)?String(value):'')
+  const [editing,setEditing]=useState(false)
+  useEffect(()=>{if(!editing)setDraft(Number.isFinite(value)?String(value):'')},[value,editing])
+  const apply=()=>{
+    setEditing(false)
+    const normalized=draft.trim().replace(',', '.')
+    if(!normalized){setDraft(Number.isFinite(value)?String(value):'');return}
+    const parsed=Number(normalized)
+    if(!Number.isFinite(parsed)){setDraft(Number.isFinite(value)?String(value):'');return}
+    const finalValue=min===undefined?parsed:Math.max(min,parsed)
+    onChange(finalValue);setDraft(String(finalValue))
+  }
+  return <label className="field"><span>{label}</span><div><input type="text" inputMode="decimal" value={draft} data-step={step} onFocus={()=>setEditing(true)} onChange={(e:ChangeEvent<HTMLInputElement>)=>setDraft(e.target.value)} onBlur={apply} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur()}} aria-label={label}/>{unit&&<small>{unit}</small>}</div></label>
 }
 
 function actionTypeName(t:MemberLoadType){return t==='uniform'?'Distribuída uniforme':t==='triangular'?'Triangular':t==='trapezoidal'?'Trapezoidal':t==='point'?'Concentrada':'Momento'}
@@ -208,7 +220,7 @@ function displayLoads(e:any,L:number):MemberLoad[]{
   return arr
 }
 
-function ModelView({model,result,selected,setSelected,diagram,zoom,setZoom,showGrid,showLabels,showLoads,showNodes,tool,barDraft,onCanvasPoint,onDeleteSupport,onDeleteNodalLoad,onDeleteMemberLoad,onOpenSupport,onOpenNodalLoad,onOpenMemberLoad,onDeleteElement,onDeleteNode,onMoveNode}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,diagram:CanvasResult,zoom:number,setZoom:(z:number)=>void,showGrid:boolean,showLabels:boolean,showLoads:boolean,showNodes:boolean,tool:Tool,barDraft:BarDraft,onCanvasPoint:(x:number,y:number)=>void,onDeleteSupport:(nodeId:number)=>void,onDeleteNodalLoad:(nodeId:number,component:LoadComponent)=>void,onDeleteMemberLoad:(elementId:number,loadId:string)=>void,onOpenSupport:(nodeId:number)=>void,onOpenNodalLoad:(nodeId:number)=>void,onOpenMemberLoad:(elementId:number,loadId?:string)=>void,onDeleteElement:(elementId:number)=>void,onDeleteNode:(nodeId:number)=>void,onMoveNode:(nodeId:number,x:number,y:number)=>void}){
+function ModelView({model,result,selected,setSelected,selectedNodeId,onSelectNode,onSelectLoad,diagram,zoom,setZoom,showGrid,showLabels,showLoads,showNodes,tool,barDraft,onCanvasPoint,onDeleteSupport,onDeleteNodalLoad,onDeleteMemberLoad,onOpenSupport,onOpenNodalLoad,onOpenMemberLoad,onDeleteElement,onDeleteNode,onMoveNode}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,selectedNodeId:number|null,onSelectNode:(id:number)=>void,onSelectLoad:(elementId:number,loadId:string)=>void,diagram:CanvasResult,zoom:number,setZoom:(z:number)=>void,showGrid:boolean,showLabels:boolean,showLoads:boolean,showNodes:boolean,tool:Tool,barDraft:BarDraft,onCanvasPoint:(x:number,y:number)=>void,onDeleteSupport:(nodeId:number)=>void,onDeleteNodalLoad:(nodeId:number,component:LoadComponent)=>void,onDeleteMemberLoad:(elementId:number,loadId:string)=>void,onOpenSupport:(nodeId:number)=>void,onOpenNodalLoad:(nodeId:number)=>void,onOpenMemberLoad:(elementId:number,loadId?:string)=>void,onDeleteElement:(elementId:number)=>void,onDeleteNode:(nodeId:number)=>void,onMoveNode:(nodeId:number,x:number,y:number)=>void}){
   const [hoverWorld,setHoverWorld]=useState<{x:number;y:number}|null>(null)
   const [dragNodeId,setDragNodeId]=useState<number|null>(null)
   const xs=model.nodes.map(n=>n.x),ys=model.nodes.map(n=>n.y)
@@ -235,7 +247,7 @@ function ModelView({model,result,selected,setSelected,diagram,zoom,setZoom,showG
   const loadGlyph=(e:any,a:{x:number;y:number},b:{x:number;y:number},L:number,l:MemberLoad,idx:number)=>{
     const dx=b.x-a.x,dy=b.y-a.y,Lpx=Math.hypot(dx,dy)||1,tx=dx/Lpx,ty=dy/Lpx,nx=-ty,ny=tx
     const pos=(xm:number)=>({x:a.x+dx*clamp(xm/Math.max(L,1e-9),0,1),y:a.y+dy*clamp(xm/Math.max(L,1e-9),0,1)})
-    const press=(ev:any)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteMemberLoad(e.id,l.id);else if(tool==='Carga'||tool==='Selecionar')onOpenMemberLoad(e.id,l.id)}
+    const press=(ev:any)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteMemberLoad(e.id,l.id);else if(tool==='Selecionar')onSelectLoad(e.id,l.id);else if(tool==='Carga')onOpenMemberLoad(e.id,l.id)}
     const cls=`memberLoadGlyph ${tool==='Apagar'?'deleteTarget':'editTarget'}`
     if(l.type==='point'){
       const c=pos(l.x??L/2),sgn=(l.P??0)>=0?1:-1
@@ -258,7 +270,7 @@ function ModelView({model,result,selected,setSelected,diagram,zoom,setZoom,showG
     {draftA&&draftB&&<g pointerEvents="none"><line x1={draftA.x} y1={draftA.y} x2={draftB.x} y2={draftB.y} stroke="#1e63b5" strokeWidth="6" strokeDasharray="12 8"/><circle cx={draftA.x} cy={draftA.y} r="6" fill="#1e63b5"/><circle cx={draftB.x} cy={draftB.y} r="6" fill="#1e63b5"/></g>}
     {result&&diagram==='Deformada'&&model.elements.map(e=>{const na=nodeMap.get(e.n1)?.n,nb=nodeMap.get(e.n2)?.n;if(!na||!nb)return null;const a=DP(na),b=DP(nb);return <line key={`def-${e.id}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1476d4" strokeWidth="3" strokeDasharray="8 6" opacity=".95" pointerEvents="none"/>})}
     {result&&diagram!=='Deformada'&&diagramPoints&&<><polyline points={diagramPoints} fill="none" stroke="#c91c23" strokeWidth="3.5" pointerEvents="none"/><text x={W-215} y="35" className="diagramLabel">{diagram}: máx. {fmt(diagramMax/selectedFactor,2)} {selectedUnit}</text></>}
-    {model.nodes.map(n=>{const pnt=P(n),hasSupport=!!(n.fixX||n.fixY||n.fixR);return <g key={n.id} className={tool==='Apoio'||tool==='Carga'||tool==='Mover'||tool==='Barra'?'editTarget':''} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNode(n.id);return}if(tool==='Mover'){ev.stopPropagation();setDragNodeId(n.id);(ev.currentTarget as SVGGElement).setPointerCapture?.(ev.pointerId);return}if(tool==='Barra'){ev.stopPropagation();onCanvasPoint(n.x,n.y);return}if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id);return}if(tool==='Carga'){ev.stopPropagation();onOpenNodalLoad(n.id);return}}}>{showNodes&&!hasSupport?<rect x={pnt.x-4} y={pnt.y-4} width="8" height="8" rx="1" fill="#263b4d" stroke="#fff" strokeWidth="1.2"/>:<circle cx={pnt.x} cy={pnt.y} r="18" fill="transparent" stroke="none"/>}{showNodes&&showLabels&&<text x={pnt.x+12} y={pnt.y-12} className="nodeLabel">N{n.id}</text>}{barDraft?.nodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="16" fill="none" stroke="#1e63b5" strokeWidth="3" strokeDasharray="4 3"/>}{hasSupport&&<g className={`${tool==='Apagar'?'deleteTarget supportTarget':''} ${tool==='Apoio'?'editTarget':''}`} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteSupport(n.id)}else if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id)}}}>{n.fixR?<><rect x={pnt.x-18} y={pnt.y} width="36" height="18" fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-25} y1={pnt.y+20} x2={pnt.x+25} y2={pnt.y+20} stroke="#263b4d" strokeWidth="4"/></>:<><path d={`M ${pnt.x-18} ${pnt.y+18} L ${pnt.x+18} ${pnt.y+18} L ${pnt.x} ${pnt.y} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/>{!n.fixX&&n.fixY&&<><circle cx={pnt.x-10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><circle cx={pnt.x+10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><line x1={pnt.x-24} y1={pnt.y+29} x2={pnt.x+24} y2={pnt.y+29} stroke="#263b4d" strokeWidth="2"/></>}{n.fixX&&n.fixY&&<line x1={pnt.x-24} y1={pnt.y+20} x2={pnt.x+24} y2={pnt.y+20} stroke="#263b4d" strokeWidth="2"/>}</>}</g>}{showLoads&&(n.fy??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fy');else if(tool==='Carga'||tool==='Selecionar')onOpenNodalLoad(n.id)}}><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {fmt(n.fy)} kN</text></g>}{showLoads&&(n.fx??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fx');else if(tool==='Carga'||tool==='Selecionar')onOpenNodalLoad(n.id)}}><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x-68} y={pnt.y-10} className="loadLabel">H = {fmt(n.fx)} kN</text></g>}{showLoads&&(n.mz??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'mz');else if(tool==='Carga'||tool==='Selecionar')onOpenNodalLoad(n.id)}}><path d={`M ${pnt.x-28} ${pnt.y-28} A 28 28 0 1 1 ${pnt.x+26} ${pnt.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3"/><text x={pnt.x+30} y={pnt.y-32} className="loadLabel">M = {fmt(n.mz)} kNm</text></g>}</g>})}
+    {model.nodes.map(n=>{const pnt=P(n),hasSupport=!!(n.fixX||n.fixY||n.fixR);return <g key={n.id} className={tool==='Apoio'||tool==='Carga'||tool==='Mover'||tool==='Barra'?'editTarget':''} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNode(n.id);return}if(tool==='Mover'){ev.stopPropagation();setDragNodeId(n.id);(ev.currentTarget as SVGGElement).setPointerCapture?.(ev.pointerId);return}if(tool==='Barra'){ev.stopPropagation();onCanvasPoint(n.x,n.y);return}if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id);return}if(tool==='Carga'){ev.stopPropagation();onOpenNodalLoad(n.id);return}if(tool==='Selecionar'){ev.stopPropagation();onSelectNode(n.id);return}}}>{selectedNodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="13" fill="none" stroke="#1e63b5" strokeDasharray="3 2" strokeWidth="2.5" pointerEvents="none"/>}{showNodes&&!hasSupport?<rect x={pnt.x-4} y={pnt.y-4} width="8" height="8" rx="1" fill="#263b4d" stroke="#fff" strokeWidth="1.2"/>:<circle cx={pnt.x} cy={pnt.y} r="18" fill="transparent" stroke="none"/>}{showNodes&&showLabels&&<text x={pnt.x+12} y={pnt.y-12} className="nodeLabel">N{n.id}</text>}{barDraft?.nodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="16" fill="none" stroke="#1e63b5" strokeWidth="3" strokeDasharray="4 3"/>}{hasSupport&&<g className={`${tool==='Apagar'?'deleteTarget supportTarget':''} ${tool==='Apoio'?'editTarget':''}`} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteSupport(n.id)}else if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id)}}}>{n.fixR?<><rect x={pnt.x-18} y={pnt.y} width="36" height="18" fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-25} y1={pnt.y+20} x2={pnt.x+25} y2={pnt.y+20} stroke="#263b4d" strokeWidth="4"/></>:<><path d={`M ${pnt.x-18} ${pnt.y+18} L ${pnt.x+18} ${pnt.y+18} L ${pnt.x} ${pnt.y} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/>{!n.fixX&&n.fixY&&<><circle cx={pnt.x-10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><circle cx={pnt.x+10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><line x1={pnt.x-24} y1={pnt.y+29} x2={pnt.x+24} y2={pnt.y+29} stroke="#263b4d" strokeWidth="2"/></>}{n.fixX&&n.fixY&&<line x1={pnt.x-24} y1={pnt.y+20} x2={pnt.x+24} y2={pnt.y+20} stroke="#263b4d" strokeWidth="2"/>}</>}</g>}{showLoads&&(n.fy??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fy');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {fmt(n.fy)} kN</text></g>}{showLoads&&(n.fx??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fx');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x-68} y={pnt.y-10} className="loadLabel">H = {fmt(n.fx)} kN</text></g>}{showLoads&&(n.mz??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'mz');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><path d={`M ${pnt.x-28} ${pnt.y-28} A 28 28 0 1 1 ${pnt.x+26} ${pnt.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3"/><text x={pnt.x+30} y={pnt.y-32} className="loadLabel">M = {fmt(n.mz)} kNm</text></g>}</g>})}
     {!model.nodes.length&&<><text x={W/2} y={H/2-12} textAnchor="middle" className="emptyCanvasTitle" pointerEvents="none">Modelo vazio</text><text x={W/2} y={H/2+18} textAnchor="middle" className="emptyCanvasHint" pointerEvents="none">Escolha Barra, Nó ou Apoio e toque diretamente na grelha.</text></>}{result&&diagram==='Deformada'&&<text x="18" y="28" className="deformLabel">Deformada ampliada ×{fmt(deformScale,1)}</text>}
   </svg>
 }
@@ -318,6 +330,9 @@ function RebarSchedule({rows}:{rows:RebarRow[]}){
 export default function App(){
   const [mode,setMode]=useState<Mode>(()=>{const saved=localStorage.getItem('rjp-structures-mode-v17')||localStorage.getItem('rjp-structures-mode-v16');return saved==='Viga'||saved==='Pórtico 2D'||saved==='Treliça 2D'?saved:'Viga'})
   const [selected,setSelected]=useState(1)
+  const [selectedNodeId,setSelectedNodeId]=useState<number|null>(null)
+  const [panelSection,setPanelSection]=useState<'Elemento'|'Ações'|'Nós e apoios'|'Materiais'>('Elemento')
+  const [activeLoadId,setActiveLoadId]=useState<string|null>(null)
   const [tab,setTab]=useState<Tab>('Modelo')
   const [tool,setTool]=useState<Tool>('Selecionar')
   const [canvasResult,setCanvasResult]=useState<CanvasResult>('M')
@@ -327,7 +342,7 @@ export default function App(){
   const [showGrid,setShowGrid]=useState(true)
   const [showLabels,setShowLabels]=useState(true)
   const [showLoads,setShowLoads]=useState(true)
-  const [showNodes,setShowNodes]=useState(()=>localStorage.getItem('rjp-structures-show-nodes-v178')==='true')
+  const [showNodes,setShowNodes]=useState(()=>(localStorage.getItem('rjp-structures-show-nodes-v179')??localStorage.getItem('rjp-structures-show-nodes-v178'))==='true')
   const [newProjectOpen,setNewProjectOpen]=useState(false)
   const [newMode,setNewMode]=useState<Mode>('Viga')
   const [newPreset,setNewPreset]=useState<StartPreset>('Barra + nós')
@@ -385,11 +400,11 @@ export default function App(){
   useEffect(()=>{localStorage.setItem('rjp-structures-mode-v17',mode)},[mode])
   useEffect(()=>{localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui));document.documentElement.style.setProperty('--ui-scale',String(ui.fontScale));document.documentElement.style.setProperty('--canvas-scale',String(ui.canvasTextScale))},[ui])
   useEffect(()=>{localStorage.setItem('rjp-structures-custom-models-v177',JSON.stringify(customModels))},[customModels])
-  useEffect(()=>{localStorage.setItem('rjp-structures-show-nodes-v178',String(showNodes))},[showNodes])
+  useEffect(()=>{localStorage.setItem('rjp-structures-show-nodes-v179',String(showNodes))},[showNodes])
   useEffect(()=>{
     const timer=window.setTimeout(()=>{
       const savedAt=new Date().toISOString()
-      const snapshot:ProjectFile={version:'1.7.8',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt}
+      const snapshot:ProjectFile={version:'1.7.9',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt}
       localStorage.setItem('rjp-structures-autosave-v17',JSON.stringify(snapshot))
       localStorage.setItem('rjp-structures-autosave-time-v17',savedAt)
       setLastAutoSave(savedAt)
@@ -416,14 +431,17 @@ export default function App(){
     setModelEdits(prev=>({...prev,[mode]:mutator(prev[mode])}))
   }
   function deleteSupport(nodeId:number){
-    editCurrentModel(cur=>cur.removedSupports.includes(nodeId)?cur:{...cur,removedSupports:[...cur.removedSupports,nodeId]})
+    const next=cloneModel(model),n=next.nodes.find(n=>n.id===nodeId);if(!n)return
+    n.fixX=false;n.fixY=false;n.fixR=false;commitGeometry(next)
   }
   function deleteNodalLoad(nodeId:number,component:LoadComponent){
-    editCurrentModel(cur=>cur.removedNodalLoads.some(x=>x.nodeId===nodeId&&x.component===component)?cur:{...cur,removedNodalLoads:[...cur.removedNodalLoads,{nodeId,component}]})
+    const next=cloneModel(model),n=next.nodes.find(n=>n.id===nodeId);if(!n)return
+    n[component]=0;commitGeometry(next)
   }
-  function restoreModeLoadsAndSupports(){setModelEdits(prev=>({...prev,[mode]:emptyModelEdits()}))}
+  function restoreModeLoadsAndSupports(){clearModelActionsAndSupports()}
   function setSupportState(nodeId:number,fixX:boolean,fixY:boolean,fixR:boolean){
-    editCurrentModel(cur=>({...cur,removedSupports:cur.removedSupports.filter(id=>id!==nodeId),supportOverrides:[...cur.supportOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,fixX,fixY,fixR}]}))
+    const next=cloneModel(model),n=next.nodes.find(n=>n.id===nodeId);if(!n)return
+    n.fixX=fixX;n.fixY=fixY;n.fixR=fixR;commitGeometry(next)
   }
   function openSupportEditor(nodeId:number){setEditorDialog({kind:'support',nodeId})}
   function openNodalEditor(nodeId:number){
@@ -433,7 +451,8 @@ export default function App(){
   function saveNodalEditor(){
     if(!editorDialog||editorDialog.kind!=='nodal')return
     const nodeId=editorDialog.nodeId,{fx,fy,mz}=nodalForm
-    editCurrentModel(cur=>({...cur,removedNodalLoads:cur.removedNodalLoads.filter(x=>x.nodeId!==nodeId),nodalLoadOverrides:[...cur.nodalLoadOverrides.filter(x=>x.nodeId!==nodeId),{nodeId,fx,fy,mz}]}))
+    const next=cloneModel(model),n=next.nodes.find(n=>n.id===nodeId)
+    if(!n)return;n.fx=fx;n.fy=fy;n.mz=mz;commitGeometry(next)
     setShowLoads(true);setEditorDialog(null)
   }
   function setElementActions(elementId:number,actions:MemberLoad[]){
@@ -465,16 +484,87 @@ export default function App(){
     else action={id,type:'trapezoidal',axis:'localY',x1,x2,q1:memberForm.q1,q2:memberForm.q2}
     if((action.type==='uniform'||action.type==='triangular'||action.type==='trapezoidal')&&x2-x1<0.001){alert('A carga distribuída precisa de um comprimento maior que zero.');return}
     if(e.kind==='truss'&&action.type!=='point'){alert('Em barras de treliça, use apenas forças concentradas axiais.');return}
-    const existing=displayLoads(e,L).filter(l=>l.id!=='legacy-qy'&&l.id!==editorDialog.loadId)
+    const existing=displayLoads(e,L).filter(l=>l.id!==editorDialog.loadId)
     setElementActions(elementId,[...existing,action]);setShowLoads(true);setEditorDialog(null)
   }
   function deleteMemberLoad(elementId:number,loadId:string){
     const e=model.elements.find(x=>x.id===elementId);if(!e)return
     const a=model.nodes.find(n=>n.id===e.n1),b=model.nodes.find(n=>n.id===e.n2),L=a&&b?Math.hypot(b.x-a.x,b.y-a.y):0
-    setElementActions(elementId,displayLoads(e,L).filter(l=>l.id!==loadId&&l.id!=='legacy-qy'))
+    setElementActions(elementId,displayLoads(e,L).filter(l=>l.id!==loadId))
   }
   function clearSelectedMemberLoads(){if(!el)return;setElementActions(el.id,[])}
 
+  function selectElementInPanel(elementId:number){
+    setSelected(elementId);setSelectedNodeId(null);setPanelSection('Elemento');setActiveLoadId(null)
+  }
+  function selectNodeInPanel(nodeId:number){
+    setSelectedNodeId(nodeId);setPanelSection('Nós e apoios');setTab('Modelo')
+  }
+  function selectLoadInPanel(elementId:number,loadId:string){
+    setSelected(elementId);setSelectedNodeId(null);setActiveLoadId(loadId);setPanelSection('Ações');setTab('Modelo')
+  }
+  /** Alterações individuais preservam as propriedades das restantes barras. */
+  function updateElement(elementId:number,mutator:(element:Model2D['elements'][number])=>void){
+    const next=cloneModel(model),elem=next.elements.find(e=>e.id===elementId)
+    if(!elem)return;mutator(elem);commitGeometry(next)
+  }
+  function editSection(elementId:number,key:'b'|'h'|'cover'|'fck'|'fyk',value:number){
+    updateElement(elementId,elem=>{
+      if(!elem.section)return
+      const section={...elem.section,[key]:value}
+      elem.section=section
+      elem.A=section.b*section.h
+      elem.I=section.b*section.h**3/12
+      if(key==='fck')elem.E=concreteProps(section.fck).Ecm
+    })
+  }
+  function editElementMechanical(elementId:number,key:'E'|'A'|'I',value:number){
+    updateElement(elementId,elem=>{elem[key]=value;/* Área/inércia explícitas podem coexistir com os parâmetros EC2; reedição de b/h repõe os valores geométricos. */})
+  }
+  function changeMemberLength(elementId:number,value:number){
+    if(!Number.isFinite(value)||value<0.1)return
+    const next=cloneModel(model),elem=next.elements.find(e=>e.id===elementId);if(!elem)return
+    const start=next.nodes.find(n=>n.id===elem.n1),end=next.nodes.find(n=>n.id===elem.n2)
+    if(!start||!end)return
+    const old=Math.hypot(end.x-start.x,end.y-start.y);if(old<0.0001)return
+    const factor=value/old;end.x=+(start.x+(end.x-start.x)*factor).toFixed(4);end.y=+(start.y+(end.y-start.y)*factor).toFixed(4)
+    // As cargas mantêm a posição proporcional ao comprimento.
+    elem.loads=elem.loads?.map(l=>({...l,x:l.x===undefined?undefined:l.x*factor,x1:l.x1===undefined?undefined:l.x1*factor,x2:l.x2===undefined?undefined:l.x2*factor}))
+    commitGeometry(next)
+  }
+  function editNodeDirectly(nodeId:number,field:'x'|'y'|'fx'|'fy'|'mz',value:number){
+    const next=cloneModel(model),node=next.nodes.find(n=>n.id===nodeId);if(!node)return
+    node[field]=value;commitGeometry(next)
+  }
+  function editAction(elementId:number,loadId:string,patch:Partial<MemberLoad>){
+    const elem=model.elements.find(e=>e.id===elementId);if(!elem)return
+    const na=model.nodes.find(n=>n.id===elem.n1),nb=model.nodes.find(n=>n.id===elem.n2)
+    const L=na&&nb?Math.hypot(nb.x-na.x,nb.y-na.y):0
+    const actions=displayLoads(elem,L).map(load=>{
+      if(load.id!==loadId)return load
+      const updated={...load,...patch}
+      if(updated.x!==undefined)updated.x=clamp(updated.x,0,L)
+      if(updated.x1!==undefined)updated.x1=clamp(updated.x1,0,L)
+      if(updated.x2!==undefined)updated.x2=clamp(updated.x2,0,L)
+      if(updated.type==='uniform'&&'q1' in patch)updated.q2=updated.q1
+      return updated
+    })
+    setElementActions(elementId,actions)
+  }
+  function addActionInPanel(elementId:number,type:MemberLoadType){
+    const elem=model.elements.find(e=>e.id===elementId);if(!elem||elem.kind==='truss'&&type!=='point')return
+    const na=model.nodes.find(n=>n.id===elem.n1),nb=model.nodes.find(n=>n.id===elem.n2)
+    const L=na&&nb?Math.hypot(nb.x-na.x,nb.y-na.y):1
+    const id=`A${Date.now().toString(36)}${Math.random().toString(36).slice(2,5)}`
+    const action:MemberLoad=type==='point'?{id,type,axis:elem.kind==='truss'?'localX':'localY',P:-10,x:L/2}:type==='moment'?{id,type,M:10,x:L/2}:type==='triangular'?{id,type,axis:'localY',x1:0,x2:L,q1:-8,q2:0}:{id,type,axis:'localY',x1:0,x2:L,q1:-8,q2:-8}
+    setElementActions(elementId,[...displayLoads(elem,L),action]);setActiveLoadId(id);setPanelSection('Ações');setShowLoads(true)
+  }
+  function clearModelActionsAndSupports(){
+    const next=cloneModel(model)
+    next.nodes.forEach(n=>{n.fixX=false;n.fixY=false;n.fixR=false;n.fx=0;n.fy=0;n.mz=0})
+    next.elements.forEach(e=>{e.qy=undefined;e.loads=[]})
+    commitGeometry(next)
+  }
   function commitGeometry(next:Model2D){
     setCustomModels(prev=>({...prev,[mode]:cloneModel(next)}))
     setModelEdits(prev=>({...prev,[mode]:emptyModelEdits()}))
@@ -501,10 +591,10 @@ export default function App(){
   }
   function deleteElement(elementId:number){
     const next=cloneModel(model);next.elements=next.elements.filter(e=>e.id!==elementId);commitGeometry(next)
-    setSelected(next.elements[0]?.id??1)
+    setSelected(next.elements[0]?.id??1);setSelectedNodeId(null)
   }
   function deleteNode(nodeId:number){
-    const next=cloneModel(model);next.elements=next.elements.filter(e=>e.n1!==nodeId&&e.n2!==nodeId);next.nodes=next.nodes.filter(n=>n.id!==nodeId);commitGeometry(next);setSelected(next.elements[0]?.id??1)
+    const next=cloneModel(model);next.elements=next.elements.filter(e=>e.n1!==nodeId&&e.n2!==nodeId);next.nodes=next.nodes.filter(n=>n.id!==nodeId);commitGeometry(next);setSelected(next.elements[0]?.id??1);setSelectedNodeId(null)
   }
   function moveNode(nodeId:number,x:number,y:number){
     const next=cloneModel(model),n=next.nodes.find(n=>n.id===nodeId);if(!n)return;n.x=x;n.y=y;commitGeometry(next)
@@ -536,7 +626,7 @@ export default function App(){
     const starter=starterModel(newMode,newPreset,fresh)
     setCustomModels(starter?{[newMode]:starter}:{})
     const nodesVisible=newPreset==='Barra + nós'||newPreset==='Nós'
-    setShowNodes(nodesVisible);setShowLabels(nodesVisible);setSelected(1);setTab('Modelo');setZoom(1);setBarDraft(null);setProjectName('Projeto estrutural');setNewProjectOpen(false)
+    setShowNodes(nodesVisible);setShowLabels(nodesVisible);setSelected(1);setSelectedNodeId(null);setPanelSection('Elemento');setTab('Modelo');setZoom(1);setBarDraft(null);setProjectName('Projeto estrutural');setNewProjectOpen(false)
   }
 
   function undo(){
@@ -548,7 +638,7 @@ export default function App(){
     setHistory(h=>[...h.slice(-49),settings]);setFuture(f=>f.slice(1));setSettings(next)
   }
 
-  const baseModel=useMemo(()=>customModels[mode]?applyCurrentElementProperties(customModels[mode]!,mode,settings):makeModel(mode,settings),[customModels,mode,settings])
+  const baseModel=useMemo(()=>customModels[mode]?cloneModel(customModels[mode]!):makeModel(mode,settings),[customModels,mode,settings])
   const model=useMemo(()=>applyModelEdits(baseModel,modelEdits[mode]),[baseModel,modelEdits,mode])
   const freeModel=!!customModels[mode]
   useEffect(()=>{if(!model.elements.some(e=>e.id===selected))setSelected(model.elements[0]?.id??1)},[model,selected])
@@ -563,6 +653,7 @@ export default function App(){
   const n1=model.nodes.find(n=>n.id===el?.n1),n2=model.nodes.find(n=>n.id===el?.n2)
   const selectedLength=n1&&n2?Math.hypot(n2.x-n1.x,n2.y-n1.y):0
   const selectedMemberLoads=el?displayLoads(el,selectedLength):[]
+  const selectedNode=model.nodes.find(n=>n.id===selectedNodeId)
   const critM=criticalSample(member,'M'),critV=criticalSample(member,'V'),critN=criticalSample(member,'N')
   const med=Math.abs(critM.value)/1e6,ved=Math.abs(critV.value)/1000,ned=Math.abs(critN.value)/1000
   const moments=momentExtrema(member)
@@ -651,11 +742,11 @@ export default function App(){
     localStorage.setItem('rjp-structures-model-edits-v17',JSON.stringify(modelEdits))
     localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui))
     localStorage.setItem('rjp-structures-custom-models-v177',JSON.stringify(customModels))
-    localStorage.setItem('rjp-structures-show-nodes-v178',String(showNodes))
+    localStorage.setItem('rjp-structures-show-nodes-v179',String(showNodes))
     const now=new Date().toISOString();setLastAutoSave(now);localStorage.setItem('rjp-structures-autosave-time-v17',now)
   }
   function exportProject(){
-    const file:ProjectFile={version:'1.7.8',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt:new Date().toISOString()}
+    const file:ProjectFile={version:'1.7.9',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt:new Date().toISOString()}
     const blob=new Blob([JSON.stringify(file,null,2)],{type:'application/json'})
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${projectName.replace(/[^a-z0-9_-]+/gi,'_')||'RJP_Structures'}_V1_7_6.json`;a.click();URL.revokeObjectURL(a.href)
   }
@@ -702,10 +793,10 @@ export default function App(){
     </header>
 
     <div className="modelStrip">
-      <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setTab('Modelo');setZoom(1);setBarDraft(null)}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
+      <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setSelectedNodeId(null);setPanelSection('Elemento');setTab('Modelo');setZoom(1);setBarDraft(null)}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
       <div className="projectTitle"><input className="projectNameInput" value={projectName} onChange={(e:any)=>setProjectName(e.target.value)} aria-label="Nome do projeto"/><span>EC2 · MEF 2D · Português de Portugal</span></div>
       <div className="historyActions" aria-label="Histórico de edição"><button onClick={undo} disabled={!history.length} title="Desfazer (Ctrl+Z)">↶</button><button onClick={redo} disabled={!future.length} title="Refazer (Ctrl+Y)">↷</button></div>
-      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.8</div>
+      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.9</div>
     </div>
 
     <main className={`studioLayout ${panelCollapsed?'panelCollapsed':''} ${focusMode?'focusMode':''}`}>
@@ -730,7 +821,7 @@ export default function App(){
             </div>
           </div>
         </div>
-        <ModelView model={model} result={result} selected={selected} setSelected={setSelected} diagram={canvasResult} zoom={zoom} setZoom={setZoom} showGrid={showGrid} showLabels={showLabels} showLoads={showLoads} showNodes={showNodes} tool={tool} barDraft={barDraft} onCanvasPoint={handleCanvasPoint} onDeleteSupport={deleteSupport} onDeleteNodalLoad={deleteNodalLoad} onDeleteMemberLoad={deleteMemberLoad} onOpenSupport={openSupportEditor} onOpenNodalLoad={openNodalEditor} onOpenMemberLoad={openMemberEditor} onDeleteElement={deleteElement} onDeleteNode={deleteNode} onMoveNode={moveNode}/>
+        <ModelView model={model} result={result} selected={selected} setSelected={selectElementInPanel} selectedNodeId={selectedNodeId} onSelectNode={selectNodeInPanel} onSelectLoad={selectLoadInPanel} diagram={canvasResult} zoom={zoom} setZoom={setZoom} showGrid={showGrid} showLabels={showLabels} showLoads={showLoads} showNodes={showNodes} tool={tool} barDraft={barDraft} onCanvasPoint={handleCanvasPoint} onDeleteSupport={deleteSupport} onDeleteNodalLoad={deleteNodalLoad} onDeleteMemberLoad={deleteMemberLoad} onOpenSupport={openSupportEditor} onOpenNodalLoad={openNodalEditor} onOpenMemberLoad={openMemberEditor} onDeleteElement={deleteElement} onDeleteNode={deleteNode} onMoveNode={moveNode}/>
         <div className="canvasStatus"><span><b>Ferramenta:</b> {tool}</span>{tool==='Apagar'&&<span className="deleteHint"><b>Apagar:</b> toque numa barra, força, momento, ação de barra ou apoio</span>}{tool==='Apoio'&&<span className="editHint"><b>Apoio:</b> toque num nó ou numa zona vazia para criar</span>}{tool==='Barra'&&<span className="editHint"><b>Barra:</b> {barDraft===null?'toque no ponto inicial':'toque no ponto final · linha azul = pré-visualização'}</span>}{tool==='Nó'&&<span className="editHint"><b>Nó:</b> toque na grelha para criar</span>}{tool==='Carga'&&<span className="editHint"><b>Carga:</b> toque num nó ou numa barra</span>}<span><b>Nós:</b> {model.nodes.length}</span><span><b>Barras:</b> {model.elements.length}</span><span><b>Zoom:</b> {fmt(zoom*100,0)}%</span><span><b>Cálculo:</b> {analysis.ok?'atualizado automaticamente':'verificar modelo'}</span></div>
         <div className="quickResults">
           <div><span>MEd</span><b>{isTruss?'—':`${fmt(med)} kNm`}</b></div>
@@ -745,40 +836,111 @@ export default function App(){
       </section>
 
       <aside className={`propertiesPanel ${panelCollapsed?'collapsed':''}`}>
-        <div className="panelTitle"><div><h2>Propriedades</h2><span>{el?`${isTruss?'Barra de treliça':isColumn?'Pilar':'Viga'} B${selected}`:'Modelo sem barra selecionada'}</span></div><button className="collapseButton" onClick={()=>setPanelCollapsed(v=>!v)} title={panelCollapsed?'Abrir painel de propriedades':'Recolher painel de propriedades'}>{panelCollapsed?'‹':'›'}</button></div>
+        <div className="panelTitle"><div><h2>Propriedades</h2><span>{selectedNode&&(tab==='Modelo'||tab==='Cargas')&&panelSection==='Nós e apoios'?`Nó N${selectedNode.id}`:el?`${isTruss?'Barra de treliça':isColumn?'Pilar':'Viga'} B${selected}`:'Seleciona um elemento'}</span></div><button className="collapseButton" onClick={()=>setPanelCollapsed(v=>!v)} title={panelCollapsed?'Abrir painel de propriedades':'Recolher painel de propriedades'}>{panelCollapsed?'‹':'›'}</button></div>
 
         <div className="selectedSummary">
-          <div><span>Comprimento</span><b>{fmt(length)} m</b></div>
-          <div><span>Secção</span><b>{sec?`${sec.b} × ${sec.h} mm`:`A = ${fmt(el?.A,0)} mm²`}</b></div>
-          {el&&el.kind!=='truss'&&<div><span>Ligações</span><b>{el.releaseStartR?'Rótula':'Rígida'} / {el.releaseEndR?'Rótula':'Rígida'}</b></div>}
+          {selectedNode&&(tab==='Modelo'||tab==='Cargas')&&panelSection==='Nós e apoios'?<>
+            <div><span>Coordenada X</span><b>{fmt(selectedNode.x)} m</b></div><div><span>Coordenada Y</span><b>{fmt(selectedNode.y)} m</b></div><div><span>Vínculo</span><b>{selectedNode.fixR?'Encastrado':selectedNode.fixX&&selectedNode.fixY?'Articulado':selectedNode.fixY?'Móvel Y':selectedNode.fixX?'Móvel X':'Livre'}</b></div>
+          </>:<>
+            <div><span>Comprimento</span><b>{fmt(length)} m</b></div>
+            <div><span>Secção</span><b>{sec?`${sec.b} × ${sec.h} mm`:`A = ${fmt(el?.A,0)} mm²`}</b></div>
+            {el&&el.kind!=='truss'&&<div><span>Ligações</span><b>{el.releaseStartR?'Rótula':'Rígida'} / {el.releaseEndR?'Rótula':'Rígida'}</b></div>}
+          </>}
         </div>
 
-        {tab==='Modelo'&&<>
-          <h3>Geometria do modelo</h3>
-          {mode==='Viga'&&<div className="fields singleColumn"><NumInput label="Vão total" value={settings.beamSpan} onChange={v=>set('beamSpan',v)} unit="m" step={0.1} min={1}/><NumInput label="Largura b" value={settings.beamB} onChange={v=>set('beamB',v)} unit="mm" step={10} min={100}/><NumInput label="Altura h" value={settings.beamH} onChange={v=>set('beamH',v)} unit="mm" step={10} min={150}/></div>}
-          {mode==='Pórtico 2D'&&<div className="fields singleColumn"><NumInput label="Vão" value={settings.frameWidth} onChange={v=>set('frameWidth',v)} unit="m" step={0.1} min={1}/><NumInput label="Altura" value={settings.frameHeight} onChange={v=>set('frameHeight',v)} unit="m" step={0.1} min={1}/><NumInput label="Viga b" value={settings.beamB} onChange={v=>set('beamB',v)} unit="mm" step={10} min={100}/><NumInput label="Viga h" value={settings.beamH} onChange={v=>set('beamH',v)} unit="mm" step={10} min={150}/><NumInput label="Pilar b" value={settings.colB} onChange={v=>set('colB',v)} unit="mm" step={10} min={150}/><NumInput label="Pilar h" value={settings.colH} onChange={v=>set('colH',v)} unit="mm" step={10} min={150}/></div>}
-          {mode==='Treliça 2D'&&<div className="fields singleColumn"><NumInput label="Vão" value={settings.trussSpan} onChange={v=>set('trussSpan',v)} unit="m" step={0.1} min={1}/><NumInput label="Altura" value={settings.trussHeight} onChange={v=>set('trussHeight',v)} unit="m" step={0.1} min={.5}/><NumInput label="Área da barra" value={settings.trussA} onChange={v=>set('trussA',v)} unit="mm²" step={100} min={100}/></div>}
-          {el&&el.kind!=='truss'&&<div className="card compact connectionCard"><b>Ligações da barra B{el.id}</b><p>As barras são criadas <b>rígidas por defeito</b>. Um nó MEF é apenas um ponto geométrico/de cálculo; não é uma rótula. Os apoios ligam diretamente à barra e não criam libertação rotacional. Só existe rótula quando a ativares aqui.</p><div className="connectionRow"><span>Início · N{el.n1}</span><div className="segmented"><button className={!el.releaseStartR?'active':''} onClick={()=>setElementRelease(el.id,'start',false)}>Rígida</button><button className={el.releaseStartR?'active dangerChoice':''} onClick={()=>setElementRelease(el.id,'start',true)}>Rótula</button></div></div><div className="connectionRow"><span>Fim · N{el.n2}</span><div className="segmented"><button className={!el.releaseEndR?'active':''} onClick={()=>setElementRelease(el.id,'end',false)}>Rígida</button><button className={el.releaseEndR?'active dangerChoice':''} onClick={()=>setElementRelease(el.id,'end',true)}>Rótula</button></div></div></div>}
-          <div className="card info compact"><b>Editor gráfico V1.7.8 {freeModel?'· modelo livre':'· modelo paramétrico'}</b><p>Em <b>Barra</b>, toque no início e no fim: a pré-visualização azul acompanha o cursor/dedo e os nós MEF são criados automaticamente, com <b>ligação rígida</b> por defeito. Em <b>Apoio</b>, toque num ponto ou nó e escolha o tipo. Em <b>Carga</b>, toque diretamente num nó ou barra e use o editor visual. Em <b>Mover</b>, arraste um nó.</p></div>
-        </>}
-
-        {tab==='Cargas'&&<>
-          <h3>Ações aplicadas</h3>
-          {!freeModel&&mode==='Viga'&&<div className="fields singleColumn"><NumInput label="Carga base distribuída q" value={settings.beamQ} onChange={v=>set('beamQ',v)} unit="kN/m" step={0.5} min={0}/><NumInput label="Carga base concentrada P" value={settings.beamP} onChange={v=>set('beamP',v)} unit="kN" step={1} min={0}/></div>}
-          {!freeModel&&mode==='Pórtico 2D'&&<div className="fields singleColumn"><NumInput label="Carga base distribuída na viga" value={settings.frameQ} onChange={v=>set('frameQ',v)} unit="kN/m" step={0.5} min={0}/><NumInput label="Ação horizontal base" value={settings.frameHLoad} onChange={v=>set('frameHLoad',v)} unit="kN" step={1} min={0}/></div>}
-          {!freeModel&&mode==='Treliça 2D'&&<div className="fields singleColumn"><NumInput label="Carga vertical base P" value={settings.trussP} onChange={v=>set('trussP',v)} unit="kN" step={1} min={0}/></div>}
-          <div className="card compact actionComposer">
-            <b>Ações na barra selecionada {el?`B${el.id}`:''}</b>
-            {el?<><p>Podes combinar várias ações na mesma barra. Os valores são definidos nos eixos locais do elemento; usa sinal negativo para cargas transversais para baixo numa viga horizontal.</p>
-              <div className="actionButtons">
-                <button onClick={()=>addMemberLoad(el.id,'point')}>＋ Concentrada</button>
-                {el.kind!=='truss'&&<><button onClick={()=>addMemberLoad(el.id,'uniform')}>＋ Uniforme</button><button onClick={()=>addMemberLoad(el.id,'triangular')}>＋ Triangular</button><button onClick={()=>addMemberLoad(el.id,'trapezoidal')}>＋ Trapezoidal</button><button onClick={()=>addMemberLoad(el.id,'moment')}>＋ Momento</button></>}
-              </div>
-              <div className="actionList">{selectedMemberLoads.length?selectedMemberLoads.map((l,i)=><div className="actionRow" key={l.id}><div><strong>A{i+1} · {actionTypeName(l.type)}</strong><span>{actionSummary(l)}</span></div><div><button className="miniButton" onClick={()=>editMemberLoad(el.id,l.id)}>Editar</button><button className="miniButton dangerButton" onClick={()=>deleteMemberLoad(el.id,l.id)}>Apagar</button></div></div>):<p className="smallHint">A barra não tem ações próprias.</p>}</div>
-              {selectedMemberLoads.length>0&&<button className="secondary inlineAction" onClick={clearSelectedMemberLoads}>Apagar todas as ações da barra</button>}
-            </>:<p>Selecione uma barra para adicionar ações.</p>}
+        {(tab==='Modelo'||tab==='Cargas')&&<>
+          <div className="propertyTabs" role="tablist" aria-label="Editor de propriedades">
+            {(['Elemento','Ações','Nós e apoios','Materiais'] as const).map(item=><button key={item} type="button" role="tab" aria-selected={panelSection===item} className={panelSection===item?'active':''} onClick={()=>setPanelSection(item)}>{item}</button>)}
           </div>
-          <div className="card compact"><b>Ações nodais e apoios</b><p>Com a ferramenta <b>Carga</b>, toque num nó para introduzir <b>Fx, Fy e Mz</b>. Se tocar numa barra, pode adicionar uma nova ação. Com <b>Apagar</b>, elimina diretamente uma força, um momento, uma ação de barra ou um apoio.</p><button className="secondary inlineAction" onClick={restoreModeLoadsAndSupports}>Repor ações e apoios do modelo</button></div>
+
+          {panelSection==='Elemento'&&<section className="propertyEditor">
+            <h3>Geometria e secção da barra</h3>
+            {el?<>
+              <label className="field"><span>Escolher barra</span><select value={el.id} onChange={e=>selectElementInPanel(Number(e.target.value))}>{model.elements.map(item=><option value={item.id} key={item.id}>B{item.id} · N{item.n1}–N{item.n2}</option>)}</select></label>
+              <div className="propertyHint">B{el.id} · {isTruss?'Treliça (esforço axial)':'Elemento de pórtico'} · edita esta barra sem alterar as restantes.</div>
+              <div className="fields singleColumn">
+                <NumInput label="Comprimento L" value={length} onChange={v=>changeMemberLength(el.id,v)} unit="m" min={0.1} step={0.1}/>
+                {sec?<>
+                  <NumInput label="Largura b" value={sec.b} onChange={v=>editSection(el.id,'b',v)} unit="mm" min={100} step={10}/>
+                  <NumInput label="Altura h" value={sec.h} onChange={v=>editSection(el.id,'h',v)} unit="mm" min={100} step={10}/>
+                  <NumInput label="Recobrimento nominal" value={sec.cover} onChange={v=>editSection(el.id,'cover',v)} unit="mm" min={10} step={5}/>
+                </>:<>
+                  <NumInput label="Área A" value={el.A} onChange={v=>editElementMechanical(el.id,'A',v)} unit="mm²" min={1} step={100}/>
+                  <NumInput label="Inércia I" value={el.I} onChange={v=>editElementMechanical(el.id,'I',v)} unit="mm⁴" min={0} step={10000}/>
+                </>}
+              </div>
+              <div className="propertyMetrics"><span>A = {fmt(el.A,0)} mm²</span><span>I = {fmt(el.I,0)} mm⁴</span></div>
+              {el.kind!=='truss'&&<div className="card compact connectionCard">
+                <b>Libertações da barra (opcionais)</b>
+                <p>Por defeito, ambos os extremos são rígidos. Um apoio articulado não é uma rótula da barra.</p>
+                <div className="connectionRow"><span>Início · N{el.n1}</span><div className="segmented"><button className={!el.releaseStartR?'active':''} onClick={()=>setElementRelease(el.id,'start',false)}>Rígida</button><button className={el.releaseStartR?'active dangerChoice':''} onClick={()=>setElementRelease(el.id,'start',true)}>Rótula</button></div></div>
+                <div className="connectionRow"><span>Fim · N{el.n2}</span><div className="segmented"><button className={!el.releaseEndR?'active':''} onClick={()=>setElementRelease(el.id,'end',false)}>Rígida</button><button className={el.releaseEndR?'active dangerChoice':''} onClick={()=>setElementRelease(el.id,'end',true)}>Rótula</button></div></div>
+              </div>}
+              <div className="inlineTools"><button onClick={()=>{setSelectedNodeId(el.n1);setPanelSection('Nós e apoios')}}>Editar início N{el.n1}</button><button onClick={()=>{setSelectedNodeId(el.n2);setPanelSection('Nós e apoios')}}>Editar fim N{el.n2}</button></div>
+              <p className="smallHint">Alterar o comprimento desloca o nó final; se for partilhado com outra barra, essa ligação acompanha o movimento. As posições das cargas nesta barra são escaladas proporcionalmente.</p>
+              <button className="deleteInline" onClick={()=>{if(window.confirm(`Apagar a barra B${el.id} e as suas cargas?`))deleteElement(el.id)}}>Apagar barra B{el.id}</button>
+            </>:<div className="card compact">Cria uma barra no desenho com a ferramenta <b>Barra</b>, ou seleciona uma barra existente.</div>}
+          </section>}
+
+          {panelSection==='Ações'&&<section className="propertyEditor">
+            <h3>Cargas e momentos · {el?`B${el.id}`:'barra não selecionada'}</h3>
+            {!freeModel&&<details className="propertyDisclosure"><summary>Ações do modelo padrão</summary><div className="fields singleColumn">
+              {mode==='Viga'&&<><NumInput label="Carga uniforme inicial" value={settings.beamQ} onChange={v=>set('beamQ',v)} unit="kN/m" min={0}/><NumInput label="Força concentrada inicial" value={settings.beamP} onChange={v=>set('beamP',v)} unit="kN" min={0}/></>}
+              {mode==='Pórtico 2D'&&<><NumInput label="Carga distribuída inicial" value={settings.frameQ} onChange={v=>set('frameQ',v)} unit="kN/m" min={0}/><NumInput label="Força horizontal inicial" value={settings.frameHLoad} onChange={v=>set('frameHLoad',v)} unit="kN" min={0}/></>}
+              {mode==='Treliça 2D'&&<NumInput label="Carga inicial" value={settings.trussP} onChange={v=>set('trussP',v)} unit="kN" min={0}/>}</div></details>}
+            {el?<>
+              <div className="propertyHint">Cada ação é independente. Podes introduzir várias forças e momentos na mesma barra, escolher o tipo e editar os valores aqui.</div>
+              <div className="actionButtons sidebarActions">
+                <button onClick={()=>addActionInPanel(el.id,'point')}>＋ Concentrada</button>
+                {el.kind!=='truss'&&<><button onClick={()=>addActionInPanel(el.id,'uniform')}>＋ Uniforme</button><button onClick={()=>addActionInPanel(el.id,'triangular')}>＋ Triangular</button><button onClick={()=>addActionInPanel(el.id,'trapezoidal')}>＋ Trapezoidal</button><button onClick={()=>addActionInPanel(el.id,'moment')}>＋ Momento</button></>}
+              </div>
+              {selectedMemberLoads.length?selectedMemberLoads.map((load,i)=><div className={`sideLoad ${activeLoadId===load.id?'expanded':''}`} key={load.id}>
+                <div className="sideLoadTop"><button className="sideLoadSelect" onClick={()=>setActiveLoadId(activeLoadId===load.id?null:load.id)}><b>A{i+1} · {actionTypeName(load.type)}</b><span>{actionSummary(load)}</span></button><button className="miniButton dangerButton" onClick={()=>{deleteMemberLoad(el.id,load.id);setActiveLoadId(null)}} aria-label={`Apagar ação A${i+1}`}>×</button></div>
+                {activeLoadId===load.id&&<div className="fields singleColumn sideLoadFields">
+                  <label className="field"><span>Tipo de ação</span><select value={load.type} onChange={e=>{
+                    const type=e.target.value as MemberLoadType
+                    if(type==='point')editAction(el.id,load.id,{type,axis:'localY',P:load.P??-10,x:load.x??length/2})
+                    else if(type==='moment')editAction(el.id,load.id,{type,M:load.M??10,x:load.x??length/2})
+                    else editAction(el.id,load.id,{type,axis:'localY',x1:load.x1??0,x2:load.x2??length,q1:load.q1??-8,q2:type==='triangular'?0:load.q2??load.q1??-8})
+                  }}><option value="point">Concentrada</option>{el.kind!=='truss'&&<><option value="uniform">Uniforme</option><option value="triangular">Triangular</option><option value="trapezoidal">Trapezoidal</option><option value="moment">Momento</option></>}</select></label>
+                  {load.type==='point'&&<><label className="field"><span>Direção</span><select value={load.axis??'localY'} onChange={e=>editAction(el.id,load.id,{axis:e.target.value as 'localY'|'localX'})}><option value="localY" disabled={el.kind==='truss'}>Transversal — eixo local Y</option><option value="localX">Axial — eixo local X</option></select></label><NumInput label="Força P" value={load.P??0} unit="kN" onChange={v=>editAction(el.id,load.id,{P:v})}/><NumInput label="Posição x" value={load.x??0} unit="m" step={0.1} min={0} onChange={v=>editAction(el.id,load.id,{x:v})}/></>}
+                  {load.type==='moment'&&<><NumInput label="Momento M" value={load.M??0} unit="kNm" onChange={v=>editAction(el.id,load.id,{M:v})}/><NumInput label="Posição x" value={load.x??0} unit="m" step={0.1} min={0} onChange={v=>editAction(el.id,load.id,{x:v})}/></>}
+                  {(['uniform','triangular','trapezoidal'] as MemberLoadType[]).includes(load.type)&&<><NumInput label="Início x1" value={load.x1??0} unit="m" step={0.1} min={0} onChange={v=>editAction(el.id,load.id,{x1:v})}/><NumInput label="Fim x2" value={load.x2??length} unit="m" step={0.1} min={0} onChange={v=>editAction(el.id,load.id,{x2:v})}/><NumInput label={load.type==='uniform'?'Intensidade q':'Intensidade q1'} value={load.q1??0} unit="kN/m" step={0.5} onChange={v=>editAction(el.id,load.id,{q1:v})}/>{load.type!=='uniform'&&<NumInput label="Intensidade q2" value={load.q2??0} unit="kN/m" step={0.5} onChange={v=>editAction(el.id,load.id,{q2:v})}/>}</>}
+                  <p className="smallHint">Coordenadas locais desde o início da barra (0 a {fmt(length)} m). Valores negativos correspondem ao sentido negativo do eixo local.</p>
+                </div>}
+              </div>):<div className="card compact">Esta barra não tem ações. Utiliza um dos botões acima para adicionar uma.</div>}
+              {!!selectedMemberLoads.length&&<button className="deleteInline" onClick={()=>{if(window.confirm('Apagar todas as ações desta barra?')){clearSelectedMemberLoads();setActiveLoadId(null)}}}>Apagar todas as ações da barra</button>}
+            </>:<div className="card compact">Seleciona uma barra no modelo antes de inserir ações.</div>}
+            <details className="propertyDisclosure"><summary>Limpeza completa do modelo</summary><p className="smallHint">Retira todas as cargas, momentos e apoios; conserva nós, barras e materiais.</p><button className="deleteInline" onClick={()=>{if(window.confirm('Retirar todas as ações e todos os apoios do modelo?'))restoreModeLoadsAndSupports()}}>Limpar todas as ações e apoios</button></details>
+          </section>}
+
+          {panelSection==='Nós e apoios'&&<section className="propertyEditor">
+            <h3>Nós, apoios e forças nodais</h3>
+            {model.nodes.length?<>
+              <label className="field"><span>Selecionar nó</span><select value={selectedNodeId??el?.n1??model.nodes[0].id} onChange={e=>setSelectedNodeId(Number(e.target.value))}>{model.nodes.map(n=><option key={n.id} value={n.id}>N{n.id}{(n.fixX||n.fixY||n.fixR)?' · apoio':''}</option>)}</select></label>
+              {(()=>{const node=model.nodes.find(n=>n.id===(selectedNodeId??el?.n1??model.nodes[0].id));if(!node)return null
+                const support=node.fixR?'fixed':node.fixX&&node.fixY?'pinned':node.fixX?'rollerX':node.fixY?'rollerY':'free'
+                return <><h3>Nó N{node.id} · posição</h3><div className="fields singleColumn">
+                  <NumInput label="Coordenada X" value={node.x} unit="m" step={0.1} onChange={v=>editNodeDirectly(node.id,'x',v)}/><NumInput label="Coordenada Y" value={node.y} unit="m" step={0.1} onChange={v=>editNodeDirectly(node.id,'y',v)}/>
+                  <label className="field"><span>Tipo de apoio</span><select value={support} onChange={e=>{const value=e.target.value;setSupportState(node.id,value==='rollerX'||value==='pinned'||value==='fixed',value==='rollerY'||value==='pinned'||value==='fixed',value==='fixed')}}><option value="free">Livre · sem restrições</option><option value="rollerY">Móvel Y · impede Y</option><option value="rollerX">Móvel X · impede X</option><option value="pinned">Articulado · impede X/Y</option><option value="fixed">Encastrado · impede X/Y/rotação</option></select></label>
+                  <NumInput label="Força Fx" value={node.fx??0} unit="kN" onChange={v=>editNodeDirectly(node.id,'fx',v)}/><NumInput label="Força Fy" value={node.fy??0} unit="kN" onChange={v=>editNodeDirectly(node.id,'fy',v)}/><NumInput label="Momento Mz" value={node.mz??0} unit="kNm" onChange={v=>editNodeDirectly(node.id,'mz',v)}/>
+                </div><div className="inlineTools"><button onClick={()=>deleteSupport(node.id)}>Retirar apoio</button><button onClick={()=>{const next=cloneModel(model),n=next.nodes.find(n=>n.id===node.id);if(n){n.fx=0;n.fy=0;n.mz=0;commitGeometry(next)}}}>Limpar Fx/Fy/Mz</button></div><p className="smallHint">O apoio é independente da ligação da barra. Mover um nó modifica todas as barras ligadas a esse nó.</p><button className="deleteInline" onClick={()=>{if(window.confirm(`Apagar N${node.id} e todas as barras que nele terminam?`))deleteNode(node.id)}}>Apagar nó N{node.id}</button></>
+              })()}
+            </>:<div className="card compact">Ainda não existem nós. Cria uma barra ou um apoio para iniciar.</div>}
+          </section>}
+
+          {panelSection==='Materiais'&&<section className="propertyEditor">
+            <h3>Material do elemento selecionado</h3>
+            {el?<div className="fields singleColumn">
+              {sec&&<><NumInput label="Betão fck" value={sec.fck} onChange={v=>editSection(el.id,'fck',v)} unit="MPa" min={12} step={5}/><NumInput label="Aço fyk" value={sec.fyk} onChange={v=>editSection(el.id,'fyk',v)} unit="MPa" min={200} step={50}/><NumInput label="Recobrimento" value={sec.cover} onChange={v=>editSection(el.id,'cover',v)} unit="mm" min={10} step={5}/></>}
+              <NumInput label="Módulo de elasticidade E" value={el.E} onChange={v=>editElementMechanical(el.id,'E',v)} unit="MPa" min={100} step={1000}/>
+              {sec?<div className="propertyMetrics"><span>A = {fmt(el.A,0)} mm²</span><span>I = {fmt(el.I,0)} mm⁴</span></div>:<><NumInput label="Área A" value={el.A} onChange={v=>editElementMechanical(el.id,'A',v)} unit="mm²" min={1} step={100}/><NumInput label="Inércia I" value={el.I} onChange={v=>editElementMechanical(el.id,'I',v)} unit="mm⁴" min={0} step={10000}/></>}
+            </div>:<p>Seleciona um elemento para editar o material.</p>}
+            <h3>Parâmetros gerais EC2</h3><div className="fields singleColumn">
+              <label className="field"><span>Classe de exposição</span><select value={settings.exposure} onChange={e=>commitSettings({...settings,exposure:e.target.value as ExposureClass})}>{(['X0','XC1','XC2','XC3','XC4','XD1','XD2','XD3','XS1','XS2','XS3'] as ExposureClass[]).map(x=><option key={x}>{x}</option>)}</select></label>
+              <NumInput label="cot θ" value={settings.cotTheta} onChange={v=>set('cotTheta',clamp(v,1,2.5))} min={1} step={0.1}/>
+            </div><div className="propertyHint">Os parâmetros geométricos e mecânicos acima são próprios da barra escolhida. O cálculo é atualizado depois de cada alteração. As verificações EC2 carecem de validação técnica.</div>
+          </section>}
         </>}
 
         {tab==='Resultados'&&<>
@@ -798,7 +960,7 @@ export default function App(){
         </>}
 
         {tab==='Relatório'&&<>
-          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.8 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p>{el&&el.kind!=='truss'&&<p><b>Ligações da barra:</b> início {el.releaseStartR?'rótula':'rígida'} · fim {el.releaseEndR?'rótula':'rígida'}</p>}<p><b>Materiais:</b> {sec?`C${settings.fck} · aço fyk ${settings.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
+          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.9 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p>{el&&el.kind!=='truss'&&<p><b>Ligações da barra:</b> início {el.releaseStartR?'rótula':'rígida'} · fim {el.releaseEndR?'rótula':'rígida'}</p>}<p><b>Materiais:</b> {sec?`fck ${sec.fck} MPa · aço fyk ${sec.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
         </>}
 
         {tab==='Definições'&&<>
@@ -840,7 +1002,7 @@ export default function App(){
       </div>
     </div>}
 
-    <nav className="bottomNav">{bottomTabs.map(x=><button key={x.tab} className={tab===x.tab?'active':''} onClick={()=>setTab(x.tab)}><span>{x.icon}</span><small>{x.label}</small></button>)}</nav>
-    <footer>RJP Structures V1.7.8 · WebApp + Android · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
+    <nav className="bottomNav">{bottomTabs.map(x=><button key={x.tab} className={tab===x.tab?'active':''} onClick={()=>{setTab(x.tab);if(x.tab==='Cargas')setPanelSection('Ações')}}><span>{x.icon}</span><small>{x.label}</small></button>)}</nav>
+    <footer>RJP Structures V1.7.9 · WebApp + Android · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
   </div>
 }
