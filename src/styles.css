@@ -145,3 +145,13 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
 .gripHint{color:#15558e!important;background:#eef6ff;border:1px solid #c4ddf3;border-radius:999px;padding:3px 8px}
 .canvas.dragActive .memberTarget,.canvas.dragActive .canvasHit{cursor:grabbing}
 @media (pointer:coarse){.gripDot,.gripHandle{opacity:.72}.canvas.directDrag .supportGrip{filter:drop-shadow(0 0 2px rgba(30,99,181,.25))}}
+
+/* V1.8.1 — propriedades contextuais + pan/zoom multitoque */
+.canvas{touch-action:none;overscroll-behavior:contain}
+.canvas.gestureActive{cursor:grabbing}
+.touchHint{color:#31556f;background:#f2f7fa;border:1px solid #cbdce8;border-radius:999px;padding:3px 8px}
+@media (pointer:coarse){
+  .canvas{touch-action:none}
+  .touchHint{display:inline-flex}
+  .propertiesPanel .field input,.propertiesPanel .field select{min-height:42px}
+}
