@@ -32,7 +32,7 @@ type ModelEdits={
   distributedLoadOverrides:DistributedLoadOverride[]
 }
 type EditsByMode=Record<Mode,ModelEdits>
-type UiSettings={fontScale:number;canvasTextScale:number;highContrast:boolean;largeTargets:boolean}
+type UiSettings={fontScale:number;canvasTextScale:number;highContrast:boolean;largeTargets:boolean;directDrag:boolean;snapStep:number}
 type BarDraft={x:number;y:number;nodeId?:number}|null
 type EditorDialog={kind:'support';nodeId:number}|{kind:'nodal';nodeId:number}|{kind:'member';elementId:number;loadId?:string}|null
 type NodalForm={fx:number;fy:number;mz:number}
@@ -87,7 +87,7 @@ const DEFAULT_SETTINGS:Settings={
   frameWidth:5,frameHeight:3,frameQ:10,frameHLoad:12,colB:300,colH:300,
   trussSpan:6,trussHeight:3,trussP:20,trussA:2500
 }
-const DEFAULT_UI:UiSettings={fontScale:1,canvasTextScale:1,highContrast:false,largeTargets:false}
+const DEFAULT_UI:UiSettings={fontScale:1,canvasTextScale:1,highContrast:false,largeTargets:false,directDrag:true,snapStep:.25}
 
 function clamp(v:number,a:number,b:number){return Math.max(a,Math.min(b,v))}
 function fmt(v:number|undefined,d=2){return v!==undefined&&Number.isFinite(v)?v.toFixed(d):'—'}
@@ -220,12 +220,44 @@ function displayLoads(e:any,L:number):MemberLoad[]{
   return arr
 }
 
-function ModelView({model,result,selected,setSelected,selectedNodeId,onSelectNode,onSelectLoad,diagram,zoom,setZoom,showGrid,showLabels,showLoads,showNodes,tool,barDraft,onCanvasPoint,onDeleteSupport,onDeleteNodalLoad,onDeleteMemberLoad,onOpenSupport,onOpenNodalLoad,onOpenMemberLoad,onDeleteElement,onDeleteNode,onMoveNode}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,selectedNodeId:number|null,onSelectNode:(id:number)=>void,onSelectLoad:(elementId:number,loadId:string)=>void,diagram:CanvasResult,zoom:number,setZoom:(z:number)=>void,showGrid:boolean,showLabels:boolean,showLoads:boolean,showNodes:boolean,tool:Tool,barDraft:BarDraft,onCanvasPoint:(x:number,y:number)=>void,onDeleteSupport:(nodeId:number)=>void,onDeleteNodalLoad:(nodeId:number,component:LoadComponent)=>void,onDeleteMemberLoad:(elementId:number,loadId:string)=>void,onOpenSupport:(nodeId:number)=>void,onOpenNodalLoad:(nodeId:number)=>void,onOpenMemberLoad:(elementId:number,loadId?:string)=>void,onDeleteElement:(elementId:number)=>void,onDeleteNode:(nodeId:number)=>void,onMoveNode:(nodeId:number,x:number,y:number)=>void}){
+function qAtLoad(load:MemberLoad,x:number){
+  const a=load.x1??0,b=load.x2??a,q1=load.q1??0,q2=load.q2??q1
+  if(b<=a)return q1
+  const t=clamp((x-a)/(b-a),0,1)
+  return q1+(q2-q1)*t
+}
+function splitLoadsAt(loads:MemberLoad[],splitX:number,L:number){
+  const left:MemberLoad[]=[],right:MemberLoad[]=[]
+  for(const load of loads){
+    if(load.type==='point'||load.type==='moment'){
+      const x=clamp(load.x??L/2,0,L)
+      if(x<=splitX+1e-9)left.push({...load,x})
+      else right.push({...load,x:x-splitX})
+      continue
+    }
+    const a=clamp(load.x1??0,0,L),b=clamp(load.x2??L,0,L)
+    if(b<=splitX+1e-9){left.push({...load,x1:a,x2:b});continue}
+    if(a>=splitX-1e-9){right.push({...load,x1:a-splitX,x2:b-splitX});continue}
+    const qs=qAtLoad(load,splitX),q1=load.q1??0,q2=load.q2??q1
+    left.push({...load,id:`${load.id}-a`,type:Math.abs(q1-qs)<1e-9?'uniform':'trapezoidal',x1:a,x2:splitX,q1,q2:qs})
+    right.push({...load,id:`${load.id}-b`,type:Math.abs(qs-q2)<1e-9?'uniform':'trapezoidal',x1:0,x2:b-splitX,q1:qs,q2})
+  }
+  return {left,right}
+}
+function projectPointToSegment(px:number,py:number,ax:number,ay:number,bx:number,by:number){
+  const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy
+  if(l2<1e-12)return {x:ax,y:ay,t:0,d:Math.hypot(px-ax,py-ay)}
+  const t=clamp(((px-ax)*dx+(py-ay)*dy)/l2,0,1),x=ax+t*dx,y=ay+t*dy
+  return {x,y,t,d:Math.hypot(px-x,py-y)}
+}
+
+function ModelView({model,result,selected,setSelected,selectedNodeId,onSelectNode,onSelectLoad,activeLoadId,diagram,zoom,setZoom,showGrid,showLabels,showLoads,showNodes,tool,barDraft,onCanvasPoint,onDeleteSupport,onDeleteNodalLoad,onDeleteMemberLoad,onOpenSupport,onOpenNodalLoad,onOpenMemberLoad,onDeleteElement,onDeleteNode,onMoveNode,onMoveSupport,onMoveMemberLoad,directDrag,snapStep}:{model:Model2D,result:FrameResult|null,selected:number,setSelected:(n:number)=>void,selectedNodeId:number|null,onSelectNode:(id:number)=>void,onSelectLoad:(elementId:number,loadId:string)=>void,activeLoadId:string|null,diagram:CanvasResult,zoom:number,setZoom:(z:number)=>void,showGrid:boolean,showLabels:boolean,showLoads:boolean,showNodes:boolean,tool:Tool,barDraft:BarDraft,onCanvasPoint:(x:number,y:number)=>void,onDeleteSupport:(nodeId:number)=>void,onDeleteNodalLoad:(nodeId:number,component:LoadComponent)=>void,onDeleteMemberLoad:(elementId:number,loadId:string)=>void,onOpenSupport:(nodeId:number)=>void,onOpenNodalLoad:(nodeId:number)=>void,onOpenMemberLoad:(elementId:number,loadId?:string)=>void,onDeleteElement:(elementId:number)=>void,onDeleteNode:(nodeId:number)=>void,onMoveNode:(nodeId:number,x:number,y:number)=>void,onMoveSupport:(nodeId:number,x:number,y:number)=>void,onMoveMemberLoad:(elementId:number,loadId:string,part:'x'|'x1'|'x2',x:number)=>void,directDrag:boolean,snapStep:number}){
   const [hoverWorld,setHoverWorld]=useState<{x:number;y:number}|null>(null)
   const [dragNodeId,setDragNodeId]=useState<number|null>(null)
+  const [dragTarget,setDragTarget]=useState<null|{kind:'support';nodeId:number}|{kind:'load';elementId:number;loadId:string;part:'x'|'x1'|'x2'}>(null)
+  const [dragWorld,setDragWorld]=useState<{x:number;y:number}|null>(null)
   const xs=model.nodes.map(n=>n.x),ys=model.nodes.map(n=>n.y)
   const rawMinX=xs.length?Math.min(...xs):0,rawMaxX=xs.length?Math.max(...xs):10,rawMinY=ys.length?Math.min(...ys):0,rawMaxY=ys.length?Math.max(...ys):6
-  // Janela base estável: evita que o desenho salte enquanto se move um nó ou se desenha uma barra.
   const minX=Math.min(-1,rawMinX-1),maxX=Math.max(11,rawMaxX+1),minY=Math.min(-2,rawMinY-1),maxY=Math.max(6,rawMaxY+1)
   const spanX=maxX-minX,spanY=maxY-minY
   const W=940,H=520,p=62,sx=(W-2*p)/spanX,sy=(H-2*p)/spanY,sc=Math.min(sx,sy)
@@ -241,36 +273,41 @@ function ModelView({model,result,selected,setSelected,selectedNodeId,onSelectNod
     if(na&&nb){const a=P(na),b=P(nb),dx=b.x-a.x,dy=b.y-a.y,Lpx=Math.hypot(dx,dy)||1,nx=-dy/Lpx,ny=dx/Lpx,vals=selectedResult.samples.map(sm=>sm[diagram]);diagramMax=Math.max(1,...vals.map(v=>Math.abs(v)));diagramPoints=selectedResult.samples.map(sm=>{const t=selectedResult.L>0?sm.x/selectedResult.L:0,baseX=a.x+dx*t,baseY=a.y+dy*t,off=(sm[diagram]/diagramMax)*72;return `${baseX+nx*off},${baseY+ny*off}`}).join(' ')}
   }
   const selectedUnit=diagram==='M'?'kNm':'kN',selectedFactor=diagram==='M'?1e6:1000,safeZoom=clamp(zoom,.7,2),vbW=W/safeZoom,vbH=H/safeZoom,vbX=(W-vbW)/2,vbY=(H-vbH)/2
-  const pointFromEvent=(e:any)=>{const svg=e.currentTarget.closest?.('svg') as SVGSVGElement||e.currentTarget as SVGSVGElement,rect=svg.getBoundingClientRect(),ux=vbX+(e.clientX-rect.left)/Math.max(1,rect.width)*vbW,uy=vbY+(e.clientY-rect.top)/Math.max(1,rect.height)*vbH;return {x:Math.round((minX+(ux-p)/sc)*4)/4,y:Math.round((minY+(H-p-uy)/sc)*4)/4}}
+  const pointFromEvent=(e:any)=>{const svg=e.currentTarget.closest?.('svg') as SVGSVGElement||e.currentTarget as SVGSVGElement,rect=svg.getBoundingClientRect(),ux=vbX+(e.clientX-rect.left)/Math.max(1,rect.width)*vbW,uy=vbY+(e.clientY-rect.top)/Math.max(1,rect.height)*vbH;let x=minX+(ux-p)/sc,y=minY+(H-p-uy)/sc;if(snapStep>0){x=Math.round(x/snapStep)*snapStep;y=Math.round(y/snapStep)*snapStep}else{x=Math.round(x*100)/100;y=Math.round(y*100)/100}return {x,y}}
   const canvasPointerDown=(e:any)=>{if(!['Nó','Barra','Apoio'].includes(tool))return;const pt=pointFromEvent(e);onCanvasPoint(pt.x,pt.y)}
-  const canvasPointerMove=(e:any)=>{const pt=pointFromEvent(e);setHoverWorld(pt);if(dragNodeId!==null)onMoveNode(dragNodeId,pt.x,pt.y)}
+  const canvasPointerMove=(e:any)=>{const pt=pointFromEvent(e);setHoverWorld(pt);if(dragNodeId!==null)onMoveNode(dragNodeId,pt.x,pt.y);if(dragTarget){setDragWorld(pt)}}
+  const finishDrag=()=>{if(dragTarget&&dragWorld){if(dragTarget.kind==='support')onMoveSupport(dragTarget.nodeId,dragWorld.x,dragWorld.y);else{const elem=model.elements.find(e=>e.id===dragTarget.elementId),a=elem?model.nodes.find(n=>n.id===elem.n1):undefined,b=elem?model.nodes.find(n=>n.id===elem.n2):undefined;if(elem&&a&&b){const pr=projectPointToSegment(dragWorld.x,dragWorld.y,a.x,a.y,b.x,b.y),L=Math.hypot(b.x-a.x,b.y-a.y);onMoveMemberLoad(elem.id,dragTarget.loadId,dragTarget.part,pr.t*L)}}}setDragTarget(null);setDragWorld(null);setDragNodeId(null)}
+  const beginGrip=(ev:any,target:NonNullable<typeof dragTarget>)=>{if(!directDrag||!(tool==='Selecionar'||tool==='Mover'))return false;ev.stopPropagation();setDragTarget(target);setDragWorld(pointFromEvent(ev));(ev.currentTarget as SVGGElement).setPointerCapture?.(ev.pointerId);return true}
   const loadGlyph=(e:any,a:{x:number;y:number},b:{x:number;y:number},L:number,l:MemberLoad,idx:number)=>{
     const dx=b.x-a.x,dy=b.y-a.y,Lpx=Math.hypot(dx,dy)||1,tx=dx/Lpx,ty=dy/Lpx,nx=-ty,ny=tx
     const pos=(xm:number)=>({x:a.x+dx*clamp(xm/Math.max(L,1e-9),0,1),y:a.y+dy*clamp(xm/Math.max(L,1e-9),0,1)})
-    const press=(ev:any)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteMemberLoad(e.id,l.id);else if(tool==='Selecionar')onSelectLoad(e.id,l.id);else if(tool==='Carga')onOpenMemberLoad(e.id,l.id)}
-    const cls=`memberLoadGlyph ${tool==='Apagar'?'deleteTarget':'editTarget'}`
+    const press=(ev:any)=>{if((l.type==='point'||l.type==='moment')&&beginGrip(ev,{kind:'load',elementId:e.id,loadId:l.id,part:'x'}))return;ev.stopPropagation();if(tool==='Apagar')onDeleteMemberLoad(e.id,l.id);else if(tool==='Selecionar')onSelectLoad(e.id,l.id);else if(tool==='Carga')onOpenMemberLoad(e.id,l.id)}
+    const cls=`memberLoadGlyph grabTarget ${activeLoadId===l.id&&selected===e.id?'selectedGrip':''} ${tool==='Apagar'?'deleteTarget':'editTarget'}`
     if(l.type==='point'){
       const c=pos(l.x??L/2),sgn=(l.P??0)>=0?1:-1
-      if(l.axis==='localX'){const x1=c.x-tx*sgn*62,y1=c.y-ty*sgn*62;return <g key={l.id} className={cls} onPointerDown={press}><line x1={x1} y1={y1} x2={c.x-tx*10*sgn} y2={c.y-ty*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={c.x+nx*18} y={c.y+ny*18} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>}
-      const x1=c.x+nx*sgn*66,y1=c.y+ny*sgn*66;return <g key={l.id} className={cls} onPointerDown={press}><line x1={x1} y1={y1} x2={c.x+nx*10*sgn} y2={c.y+ny*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={x1+12} y={y1-8} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>
+      if(l.axis==='localX'){const x1=c.x-tx*sgn*62,y1=c.y-ty*sgn*62;return <g key={l.id} className={cls} onPointerDown={press}><line x1={x1} y1={y1} x2={c.x-tx*10*sgn} y2={c.y-ty*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><circle className="gripDot" cx={c.x} cy={c.y} r="7"/><text x={c.x+nx*18} y={c.y+ny*18} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>}
+      const x1=c.x+nx*sgn*66,y1=c.y+ny*sgn*66;return <g key={l.id} className={cls} onPointerDown={press}><line x1={x1} y1={y1} x2={c.x+nx*10*sgn} y2={c.y+ny*10*sgn} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><circle className="gripDot" cx={c.x} cy={c.y} r="7"/><text x={x1+12} y={y1-8} className="loadLabel">P{idx+1}={fmt(l.P)} kN</text></g>
     }
     if(l.type==='moment'){
       const c=pos(l.x??L/2),sgn=(l.M??0)>=0?1:-1
-      return <g key={l.id} className={cls} onPointerDown={press}><path d={`M ${c.x-28} ${c.y-28} A 28 28 0 ${sgn>0?1:0} ${sgn>0?1:0} ${c.x+26} ${c.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={c.x+34} y={c.y-32} className="loadLabel">M{idx+1}={fmt(l.M)} kNm</text></g>
+      return <g key={l.id} className={cls} onPointerDown={press}><path d={`M ${c.x-28} ${c.y-28} A 28 28 0 ${sgn>0?1:0} ${sgn>0?1:0} ${c.x+26} ${c.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><circle className="gripDot" cx={c.x} cy={c.y} r="7"/><text x={c.x+34} y={c.y-32} className="loadLabel">M{idx+1}={fmt(l.M)} kNm</text></g>
     }
     const x1=l.x1??0,x2=l.x2??L,q1=l.q1??0,q2=l.q2??q1,pa=pos(x1),pb=pos(x2),offset=46
     const topA={x:pa.x+nx*offset,y:pa.y+ny*offset},topB={x:pb.x+nx*offset,y:pb.y+ny*offset}
-    return <g key={l.id} className={cls} onPointerDown={press}><line x1={topA.x} y1={topA.y} x2={topB.x} y2={topB.y} stroke="#c91c23" strokeWidth="2"/>{Array.from({length:8}).map((_,k)=>{const t=k/7,q=q1+(q2-q1)*t,c={x:pa.x+(pb.x-pa.x)*t,y:pa.y+(pb.y-pa.y)*t},mag=Math.max(10,Math.min(46,16+Math.abs(q)*2.2)),sgn=q>=0?1:-1,start={x:c.x+nx*sgn*mag,y:c.y+ny*sgn*mag},end={x:c.x+nx*sgn*7,y:c.y+ny*sgn*7};return <line key={k} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#c91c23" strokeWidth="2" markerEnd="url(#arrowRed)"/>})}<text x={(topA.x+topB.x)/2} y={(topA.y+topB.y)/2-10} textAnchor="middle" className="loadLabel">{l.type==='uniform'?'q':l.type==='triangular'?'q△':'q▱'} {fmt(q1)}→{fmt(q2)} kN/m</text></g>
+    const handle=(part:'x1'|'x2',pt:{x:number;y:number})=><circle className="gripHandle" cx={pt.x} cy={pt.y} r="8" onPointerDown={(ev)=>{if(beginGrip(ev,{kind:'load',elementId:e.id,loadId:l.id,part}))return;ev.stopPropagation();onSelectLoad(e.id,l.id)}}/>
+    return <g key={l.id} className={cls} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteMemberLoad(e.id,l.id);else if(tool==='Selecionar')onSelectLoad(e.id,l.id);else if(tool==='Carga')onOpenMemberLoad(e.id,l.id)}}><line x1={topA.x} y1={topA.y} x2={topB.x} y2={topB.y} stroke="#c91c23" strokeWidth="2"/>{Array.from({length:8}).map((_,k)=>{const t=k/7,q=q1+(q2-q1)*t,c={x:pa.x+(pb.x-pa.x)*t,y:pa.y+(pb.y-pa.y)*t},mag=Math.max(10,Math.min(46,16+Math.abs(q)*2.2)),sgn=q>=0?1:-1,start={x:c.x+nx*sgn*mag,y:c.y+ny*sgn*mag},end={x:c.x+nx*sgn*7,y:c.y+ny*sgn*7};return <line key={k} x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke="#c91c23" strokeWidth="2" markerEnd="url(#arrowRed)"/>})}{handle('x1',topA)}{handle('x2',topB)}<text x={(topA.x+topB.x)/2} y={(topA.y+topB.y)/2-10} textAnchor="middle" className="loadLabel">{l.type==='uniform'?'q':l.type==='triangular'?'q△':'q▱'} {fmt(q1)}→{fmt(q2)} kN/m</text></g>
   }
   const draftA=barDraft?P(barDraft):null,draftB=barDraft&&hoverWorld?P(hoverWorld):null
-  return <svg className={`canvas tool-${tool.toLowerCase().replace('ó','o')}`} viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`} onPointerDown={canvasPointerDown} onPointerMove={canvasPointerMove} onPointerUp={()=>setDragNodeId(null)} onPointerCancel={()=>setDragNodeId(null)} onPointerLeave={()=>{setHoverWorld(null);setDragNodeId(null)}} onWheel={(e:any)=>{e.preventDefault();setZoom(clamp(safeZoom+(e.deltaY<0?.1:-.1),.7,2))}} aria-label="Editor gráfico estrutural">
+  const dragP=dragWorld?P(dragWorld):null
+  return <svg className={`canvas ${directDrag?'directDrag':''} ${dragTarget?'dragActive':''} tool-${tool.toLowerCase().replace('ó','o')}`} viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`} onPointerDown={canvasPointerDown} onPointerMove={canvasPointerMove} onPointerUp={finishDrag} onPointerCancel={finishDrag} onPointerLeave={()=>{setHoverWorld(null);if(!dragTarget)setDragNodeId(null)}} onWheel={(e:any)=>{e.preventDefault();setZoom(clamp(safeZoom+(e.deltaY<0?.1:-.1),.7,2))}} aria-label="Editor gráfico estrutural">
     <defs><pattern id="gridSmall" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e7eaed" strokeWidth="1"/></pattern><pattern id="gridLarge" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#gridSmall)"/><path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cfd5da" strokeWidth="1.2"/></pattern><marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c91c23"/></marker></defs>
     <rect className="canvasHit" x={vbX} y={vbY} width={vbW} height={vbH} fill="#fbfcfd"/>{showGrid&&<rect x={vbX} y={vbY} width={vbW} height={vbH} fill="url(#gridLarge)" pointerEvents="none"/>}<g opacity=".75" pointerEvents="none"><line x1="35" y1={H-35} x2="88" y2={H-35} stroke="#17324b" strokeWidth="2"/><line x1="35" y1={H-35} x2="35" y2={H-88} stroke="#17324b" strokeWidth="2"/><text x="92" y={H-30} className="axisLabel">X</text><text x="26" y={H-92} className="axisLabel">Y</text></g>
     {model.elements.map(e=>{const nA=nodeMap.get(e.n1)?.n,nB=nodeMap.get(e.n2)?.n;if(!nA||!nB)return null;const a=P(nA),b=P(nB),le=Math.hypot(nB.x-nA.x,nB.y-nA.y),loads=displayLoads(e,le);return <g key={e.id}><g onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Carga'){onOpenMemberLoad(e.id);return}if(tool==='Apagar'){onDeleteElement(e.id);return}setSelected(e.id)}} className={`clickable memberTarget ${tool==='Carga'||tool==='Apagar'?'editTarget':''}`}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth="28"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={selected===e.id?'#1e63b5':'#263b4d'} strokeWidth={selected===e.id?10:7} strokeLinecap="round"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d8d8d8" strokeWidth={selected===e.id?6:4} strokeLinecap="round"/>{showLabels&&<><text x={(a.x+b.x)/2} y={(a.y+b.y)/2-13} className="memberLabel">B{e.id}</text>{selected===e.id&&<text x={(a.x+b.x)/2} y={(a.y+b.y)/2+24} className="dimLabel">{fmt(le,2)} m</text>}</>}</g>{e.kind!=='truss'&&e.releaseStartR&&<g pointerEvents="none"><circle cx={a.x+(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} cy={a.y+(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} r="11" fill="#fff" stroke="#c91c23" strokeWidth="3"/><text x={a.x+(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+14} y={a.y+(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+18} className="releaseLabel">R</text></g>}{e.kind!=='truss'&&e.releaseEndR&&<g pointerEvents="none"><circle cx={b.x-(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} cy={b.y-(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} r="11" fill="#fff" stroke="#c91c23" strokeWidth="3"/><text x={b.x-(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+14} y={b.y-(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+18} className="releaseLabel">R</text></g>}{showLoads&&loads.map((l,i)=>loadGlyph(e,a,b,le,l,i))}</g>})}
     {draftA&&draftB&&<g pointerEvents="none"><line x1={draftA.x} y1={draftA.y} x2={draftB.x} y2={draftB.y} stroke="#1e63b5" strokeWidth="6" strokeDasharray="12 8"/><circle cx={draftA.x} cy={draftA.y} r="6" fill="#1e63b5"/><circle cx={draftB.x} cy={draftB.y} r="6" fill="#1e63b5"/></g>}
     {result&&diagram==='Deformada'&&model.elements.map(e=>{const na=nodeMap.get(e.n1)?.n,nb=nodeMap.get(e.n2)?.n;if(!na||!nb)return null;const a=DP(na),b=DP(nb);return <line key={`def-${e.id}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1476d4" strokeWidth="3" strokeDasharray="8 6" opacity=".95" pointerEvents="none"/>})}
     {result&&diagram!=='Deformada'&&diagramPoints&&<><polyline points={diagramPoints} fill="none" stroke="#c91c23" strokeWidth="3.5" pointerEvents="none"/><text x={W-215} y="35" className="diagramLabel">{diagram}: máx. {fmt(diagramMax/selectedFactor,2)} {selectedUnit}</text></>}
-    {model.nodes.map(n=>{const pnt=P(n),hasSupport=!!(n.fixX||n.fixY||n.fixR);return <g key={n.id} className={tool==='Apoio'||tool==='Carga'||tool==='Mover'||tool==='Barra'?'editTarget':''} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNode(n.id);return}if(tool==='Mover'){ev.stopPropagation();setDragNodeId(n.id);(ev.currentTarget as SVGGElement).setPointerCapture?.(ev.pointerId);return}if(tool==='Barra'){ev.stopPropagation();onCanvasPoint(n.x,n.y);return}if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id);return}if(tool==='Carga'){ev.stopPropagation();onOpenNodalLoad(n.id);return}if(tool==='Selecionar'){ev.stopPropagation();onSelectNode(n.id);return}}}>{selectedNodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="13" fill="none" stroke="#1e63b5" strokeDasharray="3 2" strokeWidth="2.5" pointerEvents="none"/>}{showNodes&&!hasSupport?<rect x={pnt.x-4} y={pnt.y-4} width="8" height="8" rx="1" fill="#263b4d" stroke="#fff" strokeWidth="1.2"/>:<circle cx={pnt.x} cy={pnt.y} r="18" fill="transparent" stroke="none"/>}{showNodes&&showLabels&&<text x={pnt.x+12} y={pnt.y-12} className="nodeLabel">N{n.id}</text>}{barDraft?.nodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="16" fill="none" stroke="#1e63b5" strokeWidth="3" strokeDasharray="4 3"/>}{hasSupport&&<g className={`${tool==='Apagar'?'deleteTarget supportTarget':''} ${tool==='Apoio'?'editTarget':''}`} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteSupport(n.id)}else if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id)}}}>{n.fixR?<><rect x={pnt.x-18} y={pnt.y} width="36" height="18" fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-25} y1={pnt.y+20} x2={pnt.x+25} y2={pnt.y+20} stroke="#263b4d" strokeWidth="4"/></>:<><path d={`M ${pnt.x-18} ${pnt.y+18} L ${pnt.x+18} ${pnt.y+18} L ${pnt.x} ${pnt.y} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/>{!n.fixX&&n.fixY&&<><circle cx={pnt.x-10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><circle cx={pnt.x+10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><line x1={pnt.x-24} y1={pnt.y+29} x2={pnt.x+24} y2={pnt.y+29} stroke="#263b4d" strokeWidth="2"/></>}{n.fixX&&n.fixY&&<line x1={pnt.x-24} y1={pnt.y+20} x2={pnt.x+24} y2={pnt.y+20} stroke="#263b4d" strokeWidth="2"/>}</>}</g>}{showLoads&&(n.fy??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fy');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {fmt(n.fy)} kN</text></g>}{showLoads&&(n.fx??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fx');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x-68} y={pnt.y-10} className="loadLabel">H = {fmt(n.fx)} kN</text></g>}{showLoads&&(n.mz??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'mz');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><path d={`M ${pnt.x-28} ${pnt.y-28} A 28 28 0 1 1 ${pnt.x+26} ${pnt.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3"/><text x={pnt.x+30} y={pnt.y-32} className="loadLabel">M = {fmt(n.mz)} kNm</text></g>}</g>})}
+    {model.nodes.map(n=>{const pnt=P(n),hasSupport=!!(n.fixX||n.fixY||n.fixR);return <g key={n.id} className={tool==='Apoio'||tool==='Carga'||tool==='Mover'||tool==='Barra'?'editTarget':''} onPointerDown={(ev)=>{if(tool==='Apagar'){ev.stopPropagation();onDeleteNode(n.id);return}if(tool==='Mover'&&!hasSupport){ev.stopPropagation();setDragNodeId(n.id);(ev.currentTarget as SVGGElement).setPointerCapture?.(ev.pointerId);return}if(tool==='Barra'){ev.stopPropagation();onCanvasPoint(n.x,n.y);return}if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id);return}if(tool==='Carga'){ev.stopPropagation();onOpenNodalLoad(n.id);return}if(tool==='Selecionar'){ev.stopPropagation();onSelectNode(n.id);return}}}>{selectedNodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="13" fill="none" stroke="#1e63b5" strokeDasharray="3 2" strokeWidth="2.5" pointerEvents="none"/>}{showNodes&&!hasSupport?<rect className="nodeGrip grabTarget" x={pnt.x-4} y={pnt.y-4} width="8" height="8" rx="1" fill="#263b4d" stroke="#fff" strokeWidth="1.2" onPointerDown={(ev)=>{if(directDrag&&(tool==='Selecionar'||tool==='Mover')){ev.stopPropagation();setDragNodeId(n.id);(ev.currentTarget as SVGRectElement).setPointerCapture?.(ev.pointerId)}}}/>:<circle cx={pnt.x} cy={pnt.y} r="18" fill="transparent" stroke="none"/>}{showNodes&&showLabels&&<text x={pnt.x+12} y={pnt.y-12} className="nodeLabel">N{n.id}</text>}{barDraft?.nodeId===n.id&&<circle cx={pnt.x} cy={pnt.y} r="16" fill="none" stroke="#1e63b5" strokeWidth="3" strokeDasharray="4 3"/>}{hasSupport&&<g className={`grabTarget supportGrip ${tool==='Apagar'?'deleteTarget supportTarget':''} ${tool==='Apoio'?'editTarget':''}`} onPointerDown={(ev)=>{if(beginGrip(ev,{kind:'support',nodeId:n.id}))return;if(tool==='Apagar'){ev.stopPropagation();onDeleteSupport(n.id)}else if(tool==='Apoio'){ev.stopPropagation();onOpenSupport(n.id)}else if(tool==='Selecionar'){ev.stopPropagation();onSelectNode(n.id)}}}>{n.fixR?<><rect x={pnt.x-18} y={pnt.y} width="36" height="18" fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/><line x1={pnt.x-25} y1={pnt.y+20} x2={pnt.x+25} y2={pnt.y+20} stroke="#263b4d" strokeWidth="4"/></>:<><path d={`M ${pnt.x-18} ${pnt.y+18} L ${pnt.x+18} ${pnt.y+18} L ${pnt.x} ${pnt.y} Z`} fill="#e8eaec" stroke="#263b4d" strokeWidth="2"/>{!n.fixX&&n.fixY&&<><circle cx={pnt.x-10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><circle cx={pnt.x+10} cy={pnt.y+23} r="3.5" fill="#fff" stroke="#263b4d" strokeWidth="1.5"/><line x1={pnt.x-24} y1={pnt.y+29} x2={pnt.x+24} y2={pnt.y+29} stroke="#263b4d" strokeWidth="2"/></>}{n.fixX&&n.fixY&&<line x1={pnt.x-24} y1={pnt.y+20} x2={pnt.x+24} y2={pnt.y+20} stroke="#263b4d" strokeWidth="2"/>}</>}</g>}{showLoads&&(n.fy??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fy');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><line x1={pnt.x} y1={pnt.y-70} x2={pnt.x} y2={pnt.y-18} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x+10} y={pnt.y-58} className="loadLabel">P = {fmt(n.fy)} kN</text></g>}{showLoads&&(n.fx??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'fx');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><line x1={pnt.x-70} y1={pnt.y} x2={pnt.x-18} y2={pnt.y} stroke="#c91c23" strokeWidth="3" markerEnd="url(#arrowRed)"/><text x={pnt.x-68} y={pnt.y-10} className="loadLabel">H = {fmt(n.fx)} kN</text></g>}{showLoads&&(n.mz??0)!==0&&<g className={tool==='Apagar'?'deleteTarget':''} onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Apagar')onDeleteNodalLoad(n.id,'mz');else if(tool==='Selecionar')onSelectNode(n.id);else if(tool==='Carga')onOpenNodalLoad(n.id)}}><path d={`M ${pnt.x-28} ${pnt.y-28} A 28 28 0 1 1 ${pnt.x+26} ${pnt.y-8}`} fill="none" stroke="#c91c23" strokeWidth="3"/><text x={pnt.x+30} y={pnt.y-32} className="loadLabel">M = {fmt(n.mz)} kNm</text></g>}</g>})}
+    {dragP&&dragTarget&&<g className="dragPreview" pointerEvents="none"><circle cx={dragP.x} cy={dragP.y} r="14"/><text x={dragP.x+17} y={dragP.y-17}>{dragTarget.kind==='support'?'Mover apoio':'Mover ação'} · X {fmt(dragWorld?.x,2)} · Y {fmt(dragWorld?.y,2)}</text></g>}
     {!model.nodes.length&&<><text x={W/2} y={H/2-12} textAnchor="middle" className="emptyCanvasTitle" pointerEvents="none">Modelo vazio</text><text x={W/2} y={H/2+18} textAnchor="middle" className="emptyCanvasHint" pointerEvents="none">Escolha Barra, Nó ou Apoio e toque diretamente na grelha.</text></>}{result&&diagram==='Deformada'&&<text x="18" y="28" className="deformLabel">Deformada ampliada ×{fmt(deformScale,1)}</text>}
   </svg>
 }
@@ -342,7 +379,7 @@ export default function App(){
   const [showGrid,setShowGrid]=useState(true)
   const [showLabels,setShowLabels]=useState(true)
   const [showLoads,setShowLoads]=useState(true)
-  const [showNodes,setShowNodes]=useState(()=>(localStorage.getItem('rjp-structures-show-nodes-v179')??localStorage.getItem('rjp-structures-show-nodes-v178'))==='true')
+  const [showNodes,setShowNodes]=useState(()=>(localStorage.getItem('rjp-structures-show-nodes-v180')??localStorage.getItem('rjp-structures-show-nodes-v179')??localStorage.getItem('rjp-structures-show-nodes-v178'))==='true')
   const [newProjectOpen,setNewProjectOpen]=useState(false)
   const [newMode,setNewMode]=useState<Mode>('Viga')
   const [newPreset,setNewPreset]=useState<StartPreset>('Barra + nós')
@@ -378,7 +415,7 @@ export default function App(){
 
 
   const [customModels,setCustomModels]=useState<Partial<Record<Mode,Model2D>>>(()=>{
-    try{const raw=localStorage.getItem('rjp-structures-custom-models-v177')||localStorage.getItem('rjp-structures-custom-models-v176')||localStorage.getItem('rjp-structures-custom-models-v175')||localStorage.getItem('rjp-structures-custom-models-v172');return raw?JSON.parse(raw):{}}catch{return {}}
+    try{const raw=localStorage.getItem('rjp-structures-custom-models-v180')||localStorage.getItem('rjp-structures-custom-models-v177')||localStorage.getItem('rjp-structures-custom-models-v176')||localStorage.getItem('rjp-structures-custom-models-v175')||localStorage.getItem('rjp-structures-custom-models-v172');return raw?JSON.parse(raw):{}}catch{return {}}
   })
 
   useEffect(()=>{
@@ -399,12 +436,12 @@ export default function App(){
   useEffect(()=>{localStorage.setItem('rjp-structures-project-name-v17',projectName)},[projectName])
   useEffect(()=>{localStorage.setItem('rjp-structures-mode-v17',mode)},[mode])
   useEffect(()=>{localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui));document.documentElement.style.setProperty('--ui-scale',String(ui.fontScale));document.documentElement.style.setProperty('--canvas-scale',String(ui.canvasTextScale))},[ui])
-  useEffect(()=>{localStorage.setItem('rjp-structures-custom-models-v177',JSON.stringify(customModels))},[customModels])
-  useEffect(()=>{localStorage.setItem('rjp-structures-show-nodes-v179',String(showNodes))},[showNodes])
+  useEffect(()=>{localStorage.setItem('rjp-structures-custom-models-v180',JSON.stringify(customModels))},[customModels])
+  useEffect(()=>{localStorage.setItem('rjp-structures-show-nodes-v180',String(showNodes))},[showNodes])
   useEffect(()=>{
     const timer=window.setTimeout(()=>{
       const savedAt=new Date().toISOString()
-      const snapshot:ProjectFile={version:'1.7.9',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt}
+      const snapshot:ProjectFile={version:'1.8.0',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt}
       localStorage.setItem('rjp-structures-autosave-v17',JSON.stringify(snapshot))
       localStorage.setItem('rjp-structures-autosave-time-v17',savedAt)
       setLastAutoSave(savedAt)
@@ -620,6 +657,57 @@ export default function App(){
       setBarDraft(null);return
     }
   }
+  function moveMemberLoadByGrip(elementId:number,loadId:string,part:'x'|'x1'|'x2',x:number){
+    const elem=model.elements.find(e=>e.id===elementId);if(!elem)return
+    const na=model.nodes.find(n=>n.id===elem.n1),nb=model.nodes.find(n=>n.id===elem.n2);if(!na||!nb)return
+    const L=Math.hypot(nb.x-na.x,nb.y-na.y),actions=displayLoads(elem,L).map(load=>{
+      if(load.id!==loadId)return load
+      const v=clamp(x,0,L)
+      if(part==='x')return {...load,x:v}
+      if(part==='x1')return {...load,x1:Math.min(v,(load.x2??L)-.001)}
+      return {...load,x2:Math.max(v,(load.x1??0)+.001)}
+    })
+    setElementActions(elementId,actions);setSelected(elementId);setActiveLoadId(loadId);setPanelSection('Ações')
+  }
+  function moveSupportByGrip(nodeId:number,x:number,y:number){
+    const source=model.nodes.find(n=>n.id===nodeId);if(!source)return
+    const support={fixX:!!source.fixX,fixY:!!source.fixY,fixR:!!source.fixR}
+    if(!support.fixX&&!support.fixY&&!support.fixR)return
+    const next=cloneModel(model),src=next.nodes.find(n=>n.id===nodeId);if(!src)return
+    const incident=next.elements.filter(e=>e.n1===nodeId||e.n2===nodeId)
+    const nearestExisting=next.nodes.filter(n=>n.id!==nodeId).map(n=>({n,d:Math.hypot(n.x-x,n.y-y)})).sort((a,b)=>a.d-b.d)[0]
+    let targetId:number|undefined
+    if(nearestExisting&&nearestExisting.d<=Math.max(.2,ui.snapStep>0?ui.snapStep*.8:.2))targetId=nearestExisting.n.id
+    if(targetId===undefined){
+      let best:{e:Model2D['elements'][number];x:number;y:number;t:number;d:number;L:number}|null=null
+      for(const e of next.elements){
+        const a=next.nodes.find(n=>n.id===e.n1),b=next.nodes.find(n=>n.id===e.n2);if(!a||!b)continue
+        const pr=projectPointToSegment(x,y,a.x,a.y,b.x,b.y),L=Math.hypot(b.x-a.x,b.y-a.y)
+        if(!best||pr.d<best.d)best={e,x:pr.x,y:pr.y,t:pr.t,d:pr.d,L}
+      }
+      if(best&&best.d<=Math.max(.75,ui.snapStep>0?ui.snapStep*2:.75)){
+        if(best.t<1e-5)targetId=best.e.n1
+        else if(best.t>1-1e-5)targetId=best.e.n2
+        else{
+          const old=best.e,splitX=best.t*best.L,newNodeId=Math.max(0,...next.nodes.map(n=>n.id))+1,newElemId=Math.max(0,...next.elements.map(e=>e.id))+1
+          next.nodes.push({id:newNodeId,x:+best.x.toFixed(4),y:+best.y.toFixed(4)})
+          const loads=displayLoads(old,best.L),parts=splitLoadsAt(loads,splitX,best.L)
+          const left={...old,n2:newNodeId,qy:undefined,loads:parts.left,releaseEndR:false}
+          const right={...old,id:newElemId,n1:newNodeId,qy:undefined,loads:parts.right,releaseStartR:false}
+          next.elements=next.elements.flatMap(e=>e.id===old.id?[left,right]:[e])
+          targetId=newNodeId
+        }
+      }
+    }
+    if(targetId===undefined){
+      // Um apoio isolado pode ser movido livremente; um apoio ligado a uma barra tem de ficar num nó/barra.
+      if(!incident.length){src.x=x;src.y=y;targetId=src.id}else return
+    }
+    src.fixX=false;src.fixY=false;src.fixR=false
+    const target=next.nodes.find(n=>n.id===targetId);if(!target)return
+    target.fixX=support.fixX;target.fixY=support.fixY;target.fixR=support.fixR
+    commitGeometry(next);setSelectedNodeId(target.id);setPanelSection('Nós e apoios')
+  }
   function createNewProject(){
     const fresh={...DEFAULT_SETTINGS}
     setHistory(h=>[...h.slice(-49),settings]);setFuture([]);setSettings(fresh);setModelEdits(emptyEditsByMode());setMode(newMode)
@@ -741,14 +829,14 @@ export default function App(){
     localStorage.setItem('rjp-structures-project-name-v17',projectName)
     localStorage.setItem('rjp-structures-model-edits-v17',JSON.stringify(modelEdits))
     localStorage.setItem('rjp-structures-ui-v17',JSON.stringify(ui))
-    localStorage.setItem('rjp-structures-custom-models-v177',JSON.stringify(customModels))
-    localStorage.setItem('rjp-structures-show-nodes-v179',String(showNodes))
+    localStorage.setItem('rjp-structures-custom-models-v180',JSON.stringify(customModels))
+    localStorage.setItem('rjp-structures-show-nodes-v180',String(showNodes))
     const now=new Date().toISOString();setLastAutoSave(now);localStorage.setItem('rjp-structures-autosave-time-v17',now)
   }
   function exportProject(){
-    const file:ProjectFile={version:'1.7.9',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt:new Date().toISOString()}
+    const file:ProjectFile={version:'1.8.0',mode,settings,projectName,edits:modelEdits,ui,customModels,showNodes,savedAt:new Date().toISOString()}
     const blob=new Blob([JSON.stringify(file,null,2)],{type:'application/json'})
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${projectName.replace(/[^a-z0-9_-]+/gi,'_')||'RJP_Structures'}_V1_7_6.json`;a.click();URL.revokeObjectURL(a.href)
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`${projectName.replace(/[^a-z0-9_-]+/gi,'_')||'RJP_Structures'}_V1_8_0.json`;a.click();URL.revokeObjectURL(a.href)
   }
   function importProject(e:ChangeEvent<HTMLInputElement>){
     const f=e.target.files?.[0];if(!f)return
@@ -796,7 +884,7 @@ export default function App(){
       <div className="modelSelect"><span>Tipo de modelo</span><select value={mode} onChange={(e:ChangeEvent<HTMLSelectElement>)=>{setMode(e.target.value as Mode);setSelected(1);setSelectedNodeId(null);setPanelSection('Elemento');setTab('Modelo');setZoom(1);setBarDraft(null)}}>{(['Viga','Pórtico 2D','Treliça 2D'] as Mode[]).map(m=><option key={m}>{m}</option>)}</select></div>
       <div className="projectTitle"><input className="projectNameInput" value={projectName} onChange={(e:any)=>setProjectName(e.target.value)} aria-label="Nome do projeto"/><span>EC2 · MEF 2D · Português de Portugal</span></div>
       <div className="historyActions" aria-label="Histórico de edição"><button onClick={undo} disabled={!history.length} title="Desfazer (Ctrl+Z)">↶</button><button onClick={redo} disabled={!future.length} title="Refazer (Ctrl+Y)">↷</button></div>
-      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.7.9</div>
+      <div className="autosavePill" title={lastAutoSave?`Última gravação automática: ${new Date(lastAutoSave).toLocaleString('pt-PT')}`:'Ainda sem gravação automática'}>● {lastAutoSave?`Auto ${new Date(lastAutoSave).toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`:'Auto…'}</div><div className="versionPill">V1.8.0</div>
     </div>
 
     <main className={`studioLayout ${panelCollapsed?'panelCollapsed':''} ${focusMode?'focusMode':''}`}>
@@ -821,8 +909,8 @@ export default function App(){
             </div>
           </div>
         </div>
-        <ModelView model={model} result={result} selected={selected} setSelected={selectElementInPanel} selectedNodeId={selectedNodeId} onSelectNode={selectNodeInPanel} onSelectLoad={selectLoadInPanel} diagram={canvasResult} zoom={zoom} setZoom={setZoom} showGrid={showGrid} showLabels={showLabels} showLoads={showLoads} showNodes={showNodes} tool={tool} barDraft={barDraft} onCanvasPoint={handleCanvasPoint} onDeleteSupport={deleteSupport} onDeleteNodalLoad={deleteNodalLoad} onDeleteMemberLoad={deleteMemberLoad} onOpenSupport={openSupportEditor} onOpenNodalLoad={openNodalEditor} onOpenMemberLoad={openMemberEditor} onDeleteElement={deleteElement} onDeleteNode={deleteNode} onMoveNode={moveNode}/>
-        <div className="canvasStatus"><span><b>Ferramenta:</b> {tool}</span>{tool==='Apagar'&&<span className="deleteHint"><b>Apagar:</b> toque numa barra, força, momento, ação de barra ou apoio</span>}{tool==='Apoio'&&<span className="editHint"><b>Apoio:</b> toque num nó ou numa zona vazia para criar</span>}{tool==='Barra'&&<span className="editHint"><b>Barra:</b> {barDraft===null?'toque no ponto inicial':'toque no ponto final · linha azul = pré-visualização'}</span>}{tool==='Nó'&&<span className="editHint"><b>Nó:</b> toque na grelha para criar</span>}{tool==='Carga'&&<span className="editHint"><b>Carga:</b> toque num nó ou numa barra</span>}<span><b>Nós:</b> {model.nodes.length}</span><span><b>Barras:</b> {model.elements.length}</span><span><b>Zoom:</b> {fmt(zoom*100,0)}%</span><span><b>Cálculo:</b> {analysis.ok?'atualizado automaticamente':'verificar modelo'}</span></div>
+        <ModelView model={model} result={result} selected={selected} setSelected={selectElementInPanel} selectedNodeId={selectedNodeId} onSelectNode={selectNodeInPanel} onSelectLoad={selectLoadInPanel} activeLoadId={activeLoadId} diagram={canvasResult} zoom={zoom} setZoom={setZoom} showGrid={showGrid} showLabels={showLabels} showLoads={showLoads} showNodes={showNodes} tool={tool} barDraft={barDraft} onCanvasPoint={handleCanvasPoint} onDeleteSupport={deleteSupport} onDeleteNodalLoad={deleteNodalLoad} onDeleteMemberLoad={deleteMemberLoad} onOpenSupport={openSupportEditor} onOpenNodalLoad={openNodalEditor} onOpenMemberLoad={openMemberEditor} onDeleteElement={deleteElement} onDeleteNode={deleteNode} onMoveNode={moveNode} onMoveSupport={moveSupportByGrip} onMoveMemberLoad={moveMemberLoadByGrip} directDrag={ui.directDrag} snapStep={ui.snapStep}/>
+        <div className="canvasStatus"><span><b>Ferramenta:</b> {tool}</span>{ui.directDrag&&<span className="gripHint"><b>Grip:</b> passe sobre apoios/cargas e arraste</span>}{tool==='Apagar'&&<span className="deleteHint"><b>Apagar:</b> toque numa barra, força, momento, ação de barra ou apoio</span>}{tool==='Apoio'&&<span className="editHint"><b>Apoio:</b> toque num nó ou numa zona vazia para criar</span>}{tool==='Barra'&&<span className="editHint"><b>Barra:</b> {barDraft===null?'toque no ponto inicial':'toque no ponto final · linha azul = pré-visualização'}</span>}{tool==='Nó'&&<span className="editHint"><b>Nó:</b> toque na grelha para criar</span>}{tool==='Carga'&&<span className="editHint"><b>Carga:</b> toque num nó ou numa barra</span>}<span><b>Nós:</b> {model.nodes.length}</span><span><b>Barras:</b> {model.elements.length}</span><span><b>Zoom:</b> {fmt(zoom*100,0)}%</span><span><b>Cálculo:</b> {analysis.ok?'atualizado automaticamente':'verificar modelo'}</span></div>
         <div className="quickResults">
           <div><span>MEd</span><b>{isTruss?'—':`${fmt(med)} kNm`}</b></div>
           <div><span>VEd</span><b>{isTruss?'—':`${fmt(ved)} kN`}</b></div>
@@ -960,7 +1048,7 @@ export default function App(){
         </>}
 
         {tab==='Relatório'&&<>
-          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.7.9 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p>{el&&el.kind!=='truss'&&<p><b>Ligações da barra:</b> início {el.releaseStartR?'rótula':'rígida'} · fim {el.releaseEndR?'rótula':'rígida'}</p>}<p><b>Materiais:</b> {sec?`fck ${sec.fck} MPa · aço fyk ${sec.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
+          <h3>Relatório de cálculo</h3><div className="card report"><div className="reportHeading"><div><b>{projectName}</b><span>RJP Structures V1.8.0 · Elemento B{selected}</span></div><strong className={overallClass}>{overallState}</strong></div><p><b>Modelo:</b> {mode} · <b>Tipo:</b> {isTruss?'Treliça':isColumn?'Pilar':'Viga'}</p>{el&&el.kind!=='truss'&&<p><b>Ligações da barra:</b> início {el.releaseStartR?'rótula':'rígida'} · fim {el.releaseEndR?'rótula':'rígida'}</p>}<p><b>Materiais:</b> {sec?`fck ${sec.fck} MPa · aço fyk ${sec.fyk} MPa · exposição ${settings.exposure}`:'barra axial'}</p>{sec&&<p><b>Secção:</b> {sec.b} × {sec.h} mm · <b>Recobrimento:</b> {sec.cover} mm</p>}<p><b>Esforços críticos:</b> NEd {fmt(ned)} kN{!isTruss&&` · VEd ${fmt(ved)} kN · MEd ${fmt(med)} kNm`}</p>{selectedSchedule.length>0&&<p><b>Aço estimado da peça:</b> {fmt(steelTotal,2)} kg</p>}<hr/>{checks.length?checks.map(c=><p key={c.id}><b>{c.title}:</b> {statusLabel(c.status)} {c.utilization!==undefined&&Number.isFinite(c.utilization)?`(${fmt(c.utilization*100,0)}%)`:''}</p>):<p>Não existem verificações EC2 aplicáveis a este elemento.</p>}<button className="printBtn" onClick={()=>window.print()}>Imprimir / Guardar como PDF</button></div><div className="card warning"><b>Validação do projeto</b><p>Confirmar edição do EC2, Anexo Nacional, combinações, classe estrutural, exposição e hipóteses adotadas antes da utilização em projeto de execução.</p></div>
         </>}
 
         {tab==='Definições'&&<>
@@ -972,6 +1060,8 @@ export default function App(){
             <label className="field"><span>Texto do desenho técnico</span><select value={ui.canvasTextScale} onChange={(e:ChangeEvent<HTMLSelectElement>)=>setUi(v=>({...v,canvasTextScale:Number(e.target.value)}))}><option value={0.9}>90%</option><option value={1}>100%</option><option value={1.15}>115%</option><option value={1.3}>130%</option></select></label>
             <label className="toggleRow"><input type="checkbox" checked={ui.highContrast} onChange={e=>setUi(v=>({...v,highContrast:e.target.checked}))}/><span>Contraste reforçado</span></label>
             <label className="toggleRow"><input type="checkbox" checked={ui.largeTargets} onChange={e=>setUi(v=>({...v,largeTargets:e.target.checked}))}/><span>Botões e áreas de toque maiores</span></label>
+            <label className="toggleRow"><input type="checkbox" checked={ui.directDrag} onChange={e=>setUi(v=>({...v,directDrag:e.target.checked}))}/><span>Grab & Drag direto no desenho</span></label>
+            <label className="field"><span>Snap ao arrastar</span><select value={ui.snapStep} onChange={e=>setUi(v=>({...v,snapStep:Number(e.target.value)}))}><option value={0}>Livre</option><option value={0.05}>5 cm</option><option value={0.1}>10 cm</option><option value={0.25}>25 cm</option><option value={0.5}>50 cm</option><option value={1}>1,00 m</option></select></label>
           </div>
           <h3>Visualização e atalhos</h3><div className="card compact"><p><b>Grelha:</b> {showGrid?'visível':'oculta'} · <b>Rótulos:</b> {showLabels?'visíveis':'ocultos'} · <b>Ações:</b> {showLoads?'visíveis':'ocultas'}</p><p><b>Atalhos:</b> Ctrl+Z desfazer · Ctrl+Y refazer · Ctrl+S guardar · Esc sair do modo Foco.</p></div>
           <h3>WebApp</h3><div className="card compact webAppCard"><b>{webAppInstalled?'WebApp instalada':'Instalação no dispositivo'}</b><p>{webAppInstalled?'A RJP Structures está a correr como aplicação instalada. Os projetos continuam guardados localmente neste dispositivo.':'Podes instalar esta versão no computador, tablet ou telemóvel diretamente a partir do navegador. Depois da primeira utilização online, os ficheiros essenciais ficam disponíveis offline.'}</p>{installPrompt&&!webAppInstalled&&<button className="inlineAction" onClick={installWebApp}>Instalar RJP Structures</button>} {!installPrompt&&!webAppInstalled&&<p className="smallHint">Se o botão não aparecer, usa o menu do navegador e escolhe “Instalar aplicação” ou “Adicionar ao ecrã principal”, quando disponível.</p>}</div>
@@ -1003,6 +1093,6 @@ export default function App(){
     </div>}
 
     <nav className="bottomNav">{bottomTabs.map(x=><button key={x.tab} className={tab===x.tab?'active':''} onClick={()=>{setTab(x.tab);if(x.tab==='Cargas')setPanelSection('Ações')}}><span>{x.icon}</span><small>{x.label}</small></button>)}</nav>
-    <footer>RJP Structures V1.7.9 · WebApp + Android · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
+    <footer>RJP Structures V1.8.0 · WebApp + Android · Português de Portugal · MEF 2D · Betão Armado EC2 · acessibilidade · gravação automática · editor gráfico</footer>
   </div>
 }

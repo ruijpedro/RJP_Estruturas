@@ -1,4 +1,4 @@
-const CACHE = 'rjp-structures-v1.7.9';
+const CACHE = 'rjp-structures-v1.8.0';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icons/pwa-192.png', './icons/pwa-512.png'];
 
 self.addEventListener('install', event => {

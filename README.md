@@ -1,6 +1,16 @@
-# RJP Structures V1.7.9
+# RJP Structures V1.8.0
 
-## Novidades da V1.7.9 — painel totalmente editável
+## Novidades da V1.8.0 — Grab & Drag / Grip
+
+O editor passa a funcionar de forma mais próxima de CAD: no modo **Selecionar** ou **Mover**, passa o rato sobre um apoio, força, momento ou grip de carga distribuída, clica e arrasta. Os apoios podem ser deslocados ao longo da barra; ao largar no interior de uma barra a aplicação cria o nó MEF necessário e divide a barra internamente sem criar uma rótula.
+
+Em **Definições** podes ativar/desativar o Grab & Drag e definir o snap: livre, 5 cm, 10 cm, 25 cm, 50 cm ou 1,00 m. Em dispositivos táteis o mesmo gesto funciona por pressionar e arrastar.
+
+Consultar `CHANGELOG_V1_8_0.md` e `VALIDATION_V1_8_0.md`.
+
+## Base herdada da V1.7.9
+
+## Novidades da V1.8.0 — painel totalmente editável
 
 No separador **Modelo** ou **Cargas**, o painel da direita tem quatro áreas:
 **Elemento**, **Ações**, **Nós e apoios** e **Materiais**.
@@ -65,13 +75,13 @@ npm run build
 
 O workflow usa Node 24, Java 21 e Capacitor 7. Gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-Artefacto esperado: **`RJP-Structures-V1.7.9-debug-apk`**.
+Artefacto esperado: **`RJP-Structures-V1.8.0-debug-apk`**.
 
 ## WebApp / GitHub Pages
 
 O workflow `WebApp GitHub Pages` compila e publica a pasta `dist`. Em **Settings → Pages**, selecionar **GitHub Actions** como origem.
 
-Artefacto esperado: **`RJP-Structures-V1.7.9-WebApp`**.
+Artefacto esperado: **`RJP-Structures-V1.8.0-WebApp`**.
 
 ## Ficheiros principais
 

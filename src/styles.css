@@ -130,3 +130,18 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
 .sideLoad.expanded .sideLoadSelect{background:#eff6fb}.sideLoadFields{padding:10px;border-top:1px solid #dbe5ed}.sideLoadFields .field{width:100%}
 .propertyDisclosure{border:1px solid #dee5ea;border-radius:9px;padding:9px;background:#fafbfc}.propertyDisclosure summary{font-weight:800;color:#274359;cursor:pointer}
 @media(max-width:720px){.propertyTabs{grid-template-columns:repeat(2,minmax(0,1fr))}.inlineTools{flex-direction:column}}
+
+/* V1.8.0 — Grab & Drag / grips CAD */
+.canvas.directDrag .grabTarget{cursor:grab}
+.canvas.directDrag .grabTarget:active,.canvas.dragActive{cursor:grabbing}
+.canvas.directDrag .supportGrip:hover{filter:drop-shadow(0 0 7px rgba(30,99,181,.72))}
+.canvas.directDrag .supportGrip:hover path,.canvas.directDrag .supportGrip:hover line,.canvas.directDrag .supportGrip:hover rect{stroke:#1e63b5!important}
+.gripDot,.gripHandle{fill:#fff;stroke:#1e63b5;stroke-width:2;opacity:0;transition:opacity .12s,transform .12s;transform-box:fill-box;transform-origin:center}
+.canvas.directDrag .grabTarget:hover .gripDot,.canvas.directDrag .memberLoadGlyph:hover .gripHandle,.selectedGrip .gripDot,.selectedGrip .gripHandle{opacity:1}
+.gripHandle:hover,.gripDot:hover{fill:#1e63b5;stroke:#fff;transform:scale(1.15)}
+.nodeGrip:hover{fill:#1e63b5!important;stroke:#fff!important}
+.dragPreview circle{fill:rgba(30,99,181,.12);stroke:#1e63b5;stroke-width:2.5;stroke-dasharray:4 3}
+.dragPreview text{fill:#15558e;font-size:calc(11px * var(--canvas-scale));font-weight:850;paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round}
+.gripHint{color:#15558e!important;background:#eef6ff;border:1px solid #c4ddf3;border-radius:999px;padding:3px 8px}
+.canvas.dragActive .memberTarget,.canvas.dragActive .canvasHit{cursor:grabbing}
+@media (pointer:coarse){.gripDot,.gripHandle{opacity:.72}.canvas.directDrag .supportGrip{filter:drop-shadow(0 0 2px rgba(30,99,181,.25))}}
