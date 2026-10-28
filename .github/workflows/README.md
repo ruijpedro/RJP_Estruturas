@@ -1,0 +1,104 @@
+# RJP Structures V1.8.1
+
+
+## Novidades da V1.8.1 — Propriedades e multitoque
+
+- Painel da direita como editor contextual de barras, nós, apoios, ações, momentos, materiais, secções e ligações.
+- Seleção direta no desenho abre o elemento correspondente nas Propriedades.
+- Pan com dois dedos e pinch-to-zoom no tablet/telemóvel.
+- Zoom até 300% e comando Ajustar para centrar novamente o modelo.
+
+## Novidades da V1.8.0 — Grab & Drag / Grip
+
+O editor passa a funcionar de forma mais próxima de CAD: no modo **Selecionar** ou **Mover**, passa o rato sobre um apoio, força, momento ou grip de carga distribuída, clica e arrasta. Os apoios podem ser deslocados ao longo da barra; ao largar no interior de uma barra a aplicação cria o nó MEF necessário e divide a barra internamente sem criar uma rótula.
+
+Em **Definições** podes ativar/desativar o Grab & Drag e definir o snap: livre, 5 cm, 10 cm, 25 cm, 50 cm ou 1,00 m. Em dispositivos táteis o mesmo gesto funciona por pressionar e arrastar.
+
+Consultar `CHANGELOG_V1_8_0.md` e `VALIDATION_V1_8_0.md`.
+
+## Base herdada da V1.7.9
+
+## Novidades da V1.8.0 — painel totalmente editável
+
+No separador **Modelo** ou **Cargas**, o painel da direita tem quatro áreas:
+**Elemento**, **Ações**, **Nós e apoios** e **Materiais**.
+
+- Escolher uma barra e alterar comprimento, secção, recobrimento e ligações nos extremos.
+- Criar várias ações por barra e editar o tipo, posição, sentido e intensidade diretamente no painel.
+- Escolher um nó, deslocá-lo por coordenadas, atribuir/remover apoio e editar Fx, Fy e Mz.
+- As secções e materiais ficam guardados individualmente por barra; já não são substituídos pelas predefinições globais após cada atualização.
+- Campos numéricos aceitam `,` ou `.` decimal e aplicam o valor com Enter ou ao sair do campo.
+- Gravação automática, importação/exportação JSON, WebApp/PWA e APK mantidos.
+
+Para uma descrição técnica, consultar `CHANGELOG_V1_7_9.md`. Os limites de testes estão indicados em `VALIDATION_V1_7_9.md`.
+
+## Histórico: melhorias anteriores da V1.7.8
+
+### Apoios sem rótula automática
+- Os apoios articulados e móveis são desenhados diretamente sob a barra, sem círculo entre a viga e o apoio.
+- Colocar um apoio restringe graus de liberdade do nó, mas **não** cria uma libertação da extremidade da barra.
+- A rótula de extremidade é uma propriedade separada da barra e só aparece quando o utilizador a ativa em **Ligações da barra**.
+- Os nós MEF estão ocultos por defeito; podem ser mostrados com o botão **Nós MEF**.
+
+
+Esta versão corrige a distinção entre **nó**, **apoio** e **rótula**.
+
+- Uma barra de viga/pórtico é criada com **ligação rígida no início e no fim**.
+- Os nós MEF continuam a existir para o cálculo, mas são desenhados como pequenos pontos sólidos e **não representam rótulas**.
+- Uma rótula só existe quando é ativada em **Modelo → Ligações da barra**.
+- Cada extremidade pode ser configurada independentemente como **Rígida** ou **Rótula**.
+- As rótulas reais aparecem no desenho como um círculo branco marcado `R`.
+- O motor MEF trata as libertações rotacionais por condensação estática.
+- Numa viga contínua, barras que partilham um nó transmitem momento enquanto as ligações forem rígidas.
+- Projetos antigos sem informação de libertações são interpretados como ligações rígidas.
+- Mantêm-se o editor gráfico fluido, ações múltiplas, apoios editáveis, MEF 2D, EC2, Pormenorização, WebApp/PWA e APK Android.
+
+## Motor estrutural
+
+Unidades da interface:
+
+- geometria: m;
+- forças: kN;
+- momentos: kNm;
+- cargas distribuídas: kN/m.
+
+Internamente o MEF trabalha em **N-mm**, coerente com `E` em MPa, `A` em mm² e `I` em mm⁴. O motor suporta elementos de pórtico plano 2D, barras de treliça axiais, ações nodais e múltiplas ações de barra.
+
+## Betão Armado / EC2
+
+Mantém os módulos desenvolvidos para flexão, armaduras mínimas/máximas, corte, estribos, fissuração, deformações, tensões de serviço, durabilidade, recobrimento, espaçamentos, ancoragens, emendas, pilares, lajes, punçoamento, sapatas, fadiga simplificada, pré-verificação de incêndio, desenho esquemático e mapa estimado de armaduras.
+
+Consultar `EC2_COVERAGE.md` para cobertura e limitações. Os módulos assinalados como pré-verificação/triagem não substituem uma verificação normativa integral.
+
+## Build local
+
+Requer Node >= 22.12 e < 25.
+
+```bash
+npm install --no-audit --no-fund
+npm run build
+```
+
+## Android / GitHub Actions
+
+O workflow usa Node 24, Java 21 e Capacitor 7. Gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
+
+Artefacto esperado: **`RJP-Structures-V1.8.1-debug-apk`**.
+
+## WebApp / GitHub Pages
+
+O workflow `WebApp GitHub Pages` compila e publica a pasta `dist`. Em **Settings → Pages**, selecionar **GitHub Actions** como origem.
+
+Artefacto esperado: **`RJP-Structures-V1.8.1-WebApp`**.
+
+## Ficheiros principais
+
+- `src/App.tsx` — interface, editor e integração MEF/EC2;
+- `src/structural.ts` — motor MEF 2D e ações múltiplas de barra;
+- `src/ec2.ts` — motor EC2;
+- `src/styles.css` — interface gráfica e acessibilidade;
+- `.github/workflows/android.yml` — build Android;
+- `.github/workflows/webapp.yml` — build/publicação WebApp;
+- `CHANGELOG_V1_7_8.md` — alterações desta versão;
+- `VALIDATION_V1_7_8.md` — validações efetuadas;
+- `EC2_COVERAGE.md` — matriz de cobertura normativa.
