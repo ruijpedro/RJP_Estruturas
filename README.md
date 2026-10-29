@@ -1,7 +1,14 @@
-# RJP Structures V1.8.1
+# RJP Structures V1.8.2
 
 
-## Novidades da V1.8.1 — Propriedades e multitoque
+## Novidades da V1.8.2 — Pan e pinch corrigidos
+
+- Pan com dois dedos refeito para Android/WebView.
+- Pinch-to-zoom robusto e centrado entre os dedos.
+- Gestos nativos `touch` não-passivos evitam que o browser intercepte o movimento.
+- Mantém edição contextual da V1.8.1, Grab & Drag, EC2, WebApp e Android.
+
+## Base herdada da V1.8.1 — Propriedades e multitoque
 
 - Painel da direita como editor contextual de barras, nós, apoios, ações, momentos, materiais, secções e ligações.
 - Seleção direta no desenho abre o elemento correspondente nas Propriedades.
@@ -83,13 +90,13 @@ npm run build
 
 O workflow usa Node 24, Java 21 e Capacitor 7. Gera os ícones, aplica a correção do `ic_launcher_background`, executa `assembleDebug` e publica o APK.
 
-Artefacto esperado: **`RJP-Structures-V1.8.1-debug-apk`**.
+Artefacto esperado: **`RJP-Structures-V1.8.2-debug-apk`**.
 
 ## WebApp / GitHub Pages
 
 O workflow `WebApp GitHub Pages` compila e publica a pasta `dist`. Em **Settings → Pages**, selecionar **GitHub Actions** como origem.
 
-Artefacto esperado: **`RJP-Structures-V1.8.1-WebApp`**.
+Artefacto esperado: **`RJP-Structures-V1.8.2-WebApp`**.
 
 ## Ficheiros principais
 
