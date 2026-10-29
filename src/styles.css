@@ -155,3 +155,7 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
   .touchHint{display:inline-flex}
   .propertiesPanel .field input,.propertiesPanel .field select{min-height:42px}
 }
+
+/* V1.8.2 — multitoque robusto Android/WebView */
+.canvas,.canvas *{touch-action:none!important;-ms-touch-action:none!important}
+.canvas{overscroll-behavior:none;-webkit-user-select:none;user-select:none}

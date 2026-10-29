@@ -257,10 +257,11 @@ function ModelView({model,result,selected,setSelected,selectedNodeId,onSelectNod
   const [dragTarget,setDragTarget]=useState<null|{kind:'support';nodeId:number}|{kind:'load';elementId:number;loadId:string;part:'x'|'x1'|'x2'}>(null)
   const [dragWorld,setDragWorld]=useState<{x:number;y:number}|null>(null)
   const [pan,setPan]=useState({x:0,y:0})
-  const touchPointers=useRef(new Map<number,{x:number;y:number}>())
+  const svgRef=useRef<SVGSVGElement|null>(null)
   const gestureActive=useRef(false)
-  const pinchStart=useRef<null|{distance:number;zoom:number;anchorX:number;anchorY:number}>(null)
-  useEffect(()=>{setPan({x:0,y:0});touchPointers.current.clear();gestureActive.current=false;pinchStart.current=null},[fitViewKey])
+  const touchNav=useRef<null|{distance:number;zoom:number;anchorX:number;anchorY:number}>(null)
+  const viewState=useRef({zoom:1,vbX:0,vbY:0,vbW:940,vbH:520,panX:0,panY:0})
+  useEffect(()=>{setPan({x:0,y:0});gestureActive.current=false;touchNav.current=null},[fitViewKey])
   const xs=model.nodes.map(n=>n.x),ys=model.nodes.map(n=>n.y)
   const rawMinX=xs.length?Math.min(...xs):0,rawMaxX=xs.length?Math.max(...xs):10,rawMinY=ys.length?Math.min(...ys):0,rawMaxY=ys.length?Math.max(...ys):6
   const minX=Math.min(-1,rawMinX-1),maxX=Math.max(11,rawMaxX+1),minY=Math.min(-2,rawMinY-1),maxY=Math.max(6,rawMaxY+1)
@@ -278,29 +279,52 @@ function ModelView({model,result,selected,setSelected,selectedNodeId,onSelectNod
     if(na&&nb){const a=P(na),b=P(nb),dx=b.x-a.x,dy=b.y-a.y,Lpx=Math.hypot(dx,dy)||1,nx=-dy/Lpx,ny=dx/Lpx,vals=selectedResult.samples.map(sm=>sm[diagram]);diagramMax=Math.max(1,...vals.map(v=>Math.abs(v)));diagramPoints=selectedResult.samples.map(sm=>{const t=selectedResult.L>0?sm.x/selectedResult.L:0,baseX=a.x+dx*t,baseY=a.y+dy*t,off=(sm[diagram]/diagramMax)*72;return `${baseX+nx*off},${baseY+ny*off}`}).join(' ')}
   }
   const selectedUnit=diagram==='M'?'kNm':'kN',selectedFactor=diagram==='M'?1e6:1000,safeZoom=clamp(zoom,.7,3),vbW=W/safeZoom,vbH=H/safeZoom,baseVbX=(W-vbW)/2,baseVbY=(H-vbH)/2,vbX=baseVbX+pan.x,vbY=baseVbY+pan.y
+  viewState.current={zoom:safeZoom,vbX,vbY,vbW,vbH,panX:pan.x,panY:pan.y}
   const pointFromEvent=(e:any)=>{const svg=e.currentTarget.closest?.('svg') as SVGSVGElement||e.currentTarget as SVGSVGElement,rect=svg.getBoundingClientRect(),ux=vbX+(e.clientX-rect.left)/Math.max(1,rect.width)*vbW,uy=vbY+(e.clientY-rect.top)/Math.max(1,rect.height)*vbH;let x=minX+(ux-p)/sc,y=minY+(H-p-uy)/sc;if(snapStep>0){x=Math.round(x/snapStep)*snapStep;y=Math.round(y/snapStep)*snapStep}else{x=Math.round(x*100)/100;y=Math.round(y*100)/100}return {x,y}}
-  const beginTouchGesture=(e:any)=>{
-    if(e.pointerType!=='touch')return
-    touchPointers.current.set(e.pointerId,{x:e.clientX,y:e.clientY})
-    ;(e.currentTarget as SVGSVGElement).setPointerCapture?.(e.pointerId)
-    if(touchPointers.current.size===2){
-      const pts=[...touchPointers.current.values()],a=pts[0],b=pts[1],distance=Math.max(1,Math.hypot(b.x-a.x,b.y-a.y)),cx=(a.x+b.x)/2,cy=(a.y+b.y)/2,rect=(e.currentTarget as SVGSVGElement).getBoundingClientRect(),nx=(cx-rect.left)/Math.max(1,rect.width),ny=(cy-rect.top)/Math.max(1,rect.height)
-      pinchStart.current={distance,zoom:safeZoom,anchorX:vbX+nx*vbW,anchorY:vbY+ny*vbH};gestureActive.current=true;setDragNodeId(null);setDragTarget(null);setDragWorld(null)
+  useEffect(()=>{
+    const svg=svgRef.current
+    if(!svg)return
+    const pair=(touches:TouchList)=>{
+      if(touches.length<2)return null
+      const a=touches.item(0),b=touches.item(1)
+      if(!a||!b)return null
+      return {a,b,distance:Math.max(1,Math.hypot(b.clientX-a.clientX,b.clientY-a.clientY)),cx:(a.clientX+b.clientX)/2,cy:(a.clientY+b.clientY)/2}
     }
-  }
-  const moveTouchGesture=(e:any)=>{
-    if(e.pointerType!=='touch'||!touchPointers.current.has(e.pointerId))return
-    touchPointers.current.set(e.pointerId,{x:e.clientX,y:e.clientY})
-    if(!gestureActive.current||touchPointers.current.size<2||!pinchStart.current)return
-    e.preventDefault()
-    const pts=[...touchPointers.current.values()],a=pts[0],b=pts[1],distance=Math.max(1,Math.hypot(b.x-a.x,b.y-a.y)),cx=(a.x+b.x)/2,cy=(a.y+b.y)/2,rect=(e.currentTarget as SVGSVGElement).getBoundingClientRect(),nx=(cx-rect.left)/Math.max(1,rect.width),ny=(cy-rect.top)/Math.max(1,rect.height),newZoom=clamp(pinchStart.current.zoom*distance/pinchStart.current.distance,.7,3),newW=W/newZoom,newH=H/newZoom,newBaseX=(W-newW)/2,newBaseY=(H-newH)/2
-    setPan({x:pinchStart.current.anchorX-nx*newW-newBaseX,y:pinchStart.current.anchorY-ny*newH-newBaseY});setZoom(newZoom)
-  }
-  const endTouchGesture=(e:any)=>{
-    if(e.pointerType!=='touch')return
-    touchPointers.current.delete(e.pointerId)
-    if(touchPointers.current.size<2){gestureActive.current=false;pinchStart.current=null}
-  }
+    const start=(ev:TouchEvent)=>{
+      const g=pair(ev.touches)
+      if(!g)return
+      ev.preventDefault();ev.stopPropagation()
+      const rect=svg.getBoundingClientRect(),v=viewState.current,nx=(g.cx-rect.left)/Math.max(1,rect.width),ny=(g.cy-rect.top)/Math.max(1,rect.height)
+      touchNav.current={distance:g.distance,zoom:v.zoom,anchorX:v.vbX+nx*v.vbW,anchorY:v.vbY+ny*v.vbH}
+      gestureActive.current=true
+      setDragNodeId(null);setDragTarget(null);setDragWorld(null)
+    }
+    const move=(ev:TouchEvent)=>{
+      const g=pair(ev.touches),startState=touchNav.current
+      if(!g||!startState)return
+      ev.preventDefault();ev.stopPropagation()
+      const rect=svg.getBoundingClientRect(),nx=(g.cx-rect.left)/Math.max(1,rect.width),ny=(g.cy-rect.top)/Math.max(1,rect.height)
+      const newZoom=clamp(startState.zoom*g.distance/startState.distance,.7,3),newW=W/newZoom,newH=H/newZoom,newBaseX=(W-newW)/2,newBaseY=(H-newH)/2
+      setPan({x:startState.anchorX-nx*newW-newBaseX,y:startState.anchorY-ny*newH-newBaseY})
+      setZoom(newZoom)
+    }
+    const end=(ev:TouchEvent)=>{
+      if(ev.touches.length>=2){
+        const g=pair(ev.touches)
+        if(g){
+          const rect=svg.getBoundingClientRect(),v=viewState.current,nx=(g.cx-rect.left)/Math.max(1,rect.width),ny=(g.cy-rect.top)/Math.max(1,rect.height)
+          touchNav.current={distance:g.distance,zoom:v.zoom,anchorX:v.vbX+nx*v.vbW,anchorY:v.vbY+ny*v.vbH}
+        }
+        return
+      }
+      touchNav.current=null;gestureActive.current=false
+    }
+    svg.addEventListener('touchstart',start,{passive:false})
+    svg.addEventListener('touchmove',move,{passive:false})
+    svg.addEventListener('touchend',end,{passive:false})
+    svg.addEventListener('touchcancel',end,{passive:false})
+    return()=>{svg.removeEventListener('touchstart',start);svg.removeEventListener('touchmove',move);svg.removeEventListener('touchend',end);svg.removeEventListener('touchcancel',end)}
+  },[setZoom])
   const canvasPointerDown=(e:any)=>{if(gestureActive.current||!['Nó','Barra','Apoio'].includes(tool))return;const pt=pointFromEvent(e);onCanvasPoint(pt.x,pt.y)}
   const canvasPointerMove=(e:any)=>{if(gestureActive.current)return;const pt=pointFromEvent(e);setHoverWorld(pt);if(dragNodeId!==null)onMoveNode(dragNodeId,pt.x,pt.y);if(dragTarget){setDragWorld(pt)}}
   const finishDrag=()=>{if(dragTarget&&dragWorld){if(dragTarget.kind==='support')onMoveSupport(dragTarget.nodeId,dragWorld.x,dragWorld.y);else{const elem=model.elements.find(e=>e.id===dragTarget.elementId),a=elem?model.nodes.find(n=>n.id===elem.n1):undefined,b=elem?model.nodes.find(n=>n.id===elem.n2):undefined;if(elem&&a&&b){const pr=projectPointToSegment(dragWorld.x,dragWorld.y,a.x,a.y,b.x,b.y),L=Math.hypot(b.x-a.x,b.y-a.y);onMoveMemberLoad(elem.id,dragTarget.loadId,dragTarget.part,pr.t*L)}}}setDragTarget(null);setDragWorld(null);setDragNodeId(null)}
@@ -326,7 +350,7 @@ function ModelView({model,result,selected,setSelected,selectedNodeId,onSelectNod
   }
   const draftA=barDraft?P(barDraft):null,draftB=barDraft&&hoverWorld?P(hoverWorld):null
   const dragP=dragWorld?P(dragWorld):null
-  return <svg className={`canvas ${directDrag?'directDrag':''} ${dragTarget?'dragActive':''} ${gestureActive.current?'gestureActive':''} tool-${tool.toLowerCase().replace('ó','o')}`} viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`} onPointerDownCapture={beginTouchGesture} onPointerMoveCapture={moveTouchGesture} onPointerUpCapture={endTouchGesture} onPointerCancelCapture={endTouchGesture} onPointerDown={canvasPointerDown} onPointerMove={canvasPointerMove} onPointerUp={finishDrag} onPointerCancel={finishDrag} onPointerLeave={()=>{setHoverWorld(null);if(!dragTarget)setDragNodeId(null)}} onWheel={(e:any)=>{e.preventDefault();setZoom(clamp(safeZoom+(e.deltaY<0?.1:-.1),.7,3))}} aria-label="Editor gráfico estrutural">
+  return <svg ref={svgRef} className={`canvas ${directDrag?'directDrag':''} ${dragTarget?'dragActive':''} ${gestureActive.current?'gestureActive':''} tool-${tool.toLowerCase().replace('ó','o')}`} viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`} onPointerDown={canvasPointerDown} onPointerMove={canvasPointerMove} onPointerUp={finishDrag} onPointerCancel={finishDrag} onPointerLeave={()=>{setHoverWorld(null);if(!dragTarget)setDragNodeId(null)}} onWheel={(e:any)=>{e.preventDefault();setZoom(clamp(safeZoom+(e.deltaY<0?.1:-.1),.7,3))}} aria-label="Editor gráfico estrutural">
     <defs><pattern id="gridSmall" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e7eaed" strokeWidth="1"/></pattern><pattern id="gridLarge" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#gridSmall)"/><path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cfd5da" strokeWidth="1.2"/></pattern><marker id="arrowRed" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c91c23"/></marker></defs>
     <rect className="canvasHit" x={vbX} y={vbY} width={vbW} height={vbH} fill="#fbfcfd"/>{showGrid&&<rect x={vbX} y={vbY} width={vbW} height={vbH} fill="url(#gridLarge)" pointerEvents="none"/>}<g opacity=".75" pointerEvents="none"><line x1="35" y1={H-35} x2="88" y2={H-35} stroke="#17324b" strokeWidth="2"/><line x1="35" y1={H-35} x2="35" y2={H-88} stroke="#17324b" strokeWidth="2"/><text x="92" y={H-30} className="axisLabel">X</text><text x="26" y={H-92} className="axisLabel">Y</text></g>
     {model.elements.map(e=>{const nA=nodeMap.get(e.n1)?.n,nB=nodeMap.get(e.n2)?.n;if(!nA||!nB)return null;const a=P(nA),b=P(nB),le=Math.hypot(nB.x-nA.x,nB.y-nA.y),loads=displayLoads(e,le);return <g key={e.id}><g onPointerDown={(ev)=>{ev.stopPropagation();if(tool==='Carga'){onOpenMemberLoad(e.id);return}if(tool==='Apagar'){onDeleteElement(e.id);return}setSelected(e.id)}} className={`clickable memberTarget ${tool==='Carga'||tool==='Apagar'?'editTarget':''}`}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth="28"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={selected===e.id?'#1e63b5':'#263b4d'} strokeWidth={selected===e.id?10:7} strokeLinecap="round"/><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#d8d8d8" strokeWidth={selected===e.id?6:4} strokeLinecap="round"/>{showLabels&&<><text x={(a.x+b.x)/2} y={(a.y+b.y)/2-13} className="memberLabel">B{e.id}</text>{selected===e.id&&<text x={(a.x+b.x)/2} y={(a.y+b.y)/2+24} className="dimLabel">{fmt(le,2)} m</text>}</>}</g>{e.kind!=='truss'&&e.releaseStartR&&<g pointerEvents="none"><circle cx={a.x+(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} cy={a.y+(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} r="11" fill="#fff" stroke="#c91c23" strokeWidth="3"/><text x={a.x+(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+14} y={a.y+(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+18} className="releaseLabel">R</text></g>}{e.kind!=='truss'&&e.releaseEndR&&<g pointerEvents="none"><circle cx={b.x-(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} cy={b.y-(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12} r="11" fill="#fff" stroke="#c91c23" strokeWidth="3"/><text x={b.x-(b.x-a.x)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+14} y={b.y-(b.y-a.y)/Math.max(1,Math.hypot(b.x-a.x,b.y-a.y))*12+18} className="releaseLabel">R</text></g>}{showLoads&&loads.map((l,i)=>loadGlyph(e,a,b,le,l,i))}</g>})}
