@@ -156,6 +156,11 @@ footer{padding:6px 15px;background:#183246;color:#dbe5ec;font-size:10px;text-ali
   .propertiesPanel .field input,.propertiesPanel .field select{min-height:42px}
 }
 
-/* V1.8.2 — multitoque robusto Android/WebView */
+/* V1.8.3 — multitoque robusto Android/WebView */
 .canvas,.canvas *{touch-action:none!important;-ms-touch-action:none!important}
 .canvas{overscroll-behavior:none;-webkit-user-select:none;user-select:none}
+
+/* V1.8.3 — pan com um dedo/rato no fundo do canvas */
+.canvas.tool-selecionar .canvasHit,.canvas.tool-mover .canvasHit{cursor:grab}
+.canvas.tool-selecionar:active .canvasHit,.canvas.tool-mover:active .canvasHit{cursor:grabbing}
+@media (pointer:coarse){.canvas.tool-selecionar,.canvas.tool-mover{touch-action:none!important}}
